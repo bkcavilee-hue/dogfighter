@@ -25,6 +25,7 @@ export class Network {
     this.you = null;             // { id, name, plane, team } once joined
     this.roomId = null;
     this.players = [];           // remote players in our room (excludes us)
+    this.roster = [];            // FULL ordered roster including us (join order)
     this._stateTimer = null;
     this._buildState = null;     // function returning the current local state
     this._listeners = {
@@ -63,13 +64,19 @@ export class Network {
 
     this.socket.on('lobby:roomList', ({ rooms }) => this._fire('roomList', rooms));
     this.socket.on('lobby:playerJoined', ({ player }) => {
+      // Idempotent: ignore duplicate joins for the same id (which can happen
+      // if a peer reconnects/rejoins before the server processed their leave).
+      if (this.roster.some((p) => p.id === player.id)) return;
+      if (this.players.some((p) => p.id === player.id)) return;
       console.log('[MP] player joined:', player.name, player.id);
       this.players.push(player);
+      this.roster.push(player);
       this._fire('playerJoined', player);
     });
     this.socket.on('lobby:playerLeft', ({ playerId }) => {
       console.log('[MP] player left:', playerId);
       this.players = this.players.filter((p) => p.id !== playerId);
+      this.roster = this.roster.filter((p) => p.id !== playerId);
       this._fire('playerLeft', playerId);
     });
     this.socket.on('game:state', ({ id, state }) => this._fire('remoteState', id, state));
@@ -89,6 +96,7 @@ export class Network {
         if (res?.ok) {
           this.you = res.you;
           this.roomId = res.roomId;
+          this.roster = res.players.slice();          // full ordered list (just us at first)
           this.players = res.players.filter((p) => p.id !== this.you.id);
           console.log(`[MP] created room "${name}" (${res.roomId}); you are ${this.you.name} (${this.you.team})`);
           resolve(res);
@@ -103,6 +111,7 @@ export class Network {
         if (res?.ok) {
           this.you = res.you;
           this.roomId = res.roomId;
+          this.roster = res.players.slice();          // full ordered list as the server sees it
           this.players = res.players.filter((p) => p.id !== this.you.id);
           console.log(`[MP] joined room ${res.roomId}; you are ${this.you.name} (${this.you.team}); ${this.players.length} other player(s)`);
           resolve(res);
@@ -117,7 +126,20 @@ export class Network {
     this.roomId = null;
     this.you = null;
     this.players = [];
+    this.roster = [];
     this.stopStateLoop();
+  }
+
+  /**
+   * Host = the FIRST player in the join-order roster. If the host leaves,
+   * the next player in line takes over automatically because everyone reads
+   * from the same ordered list. Returns the player record or null.
+   */
+  getHost() {
+    return this.roster[0] || null;
+  }
+  isHost() {
+    return !!this.you && this.getHost()?.id === this.you.id;
   }
 
   /* -------------------- In-game state push ------------------------- */

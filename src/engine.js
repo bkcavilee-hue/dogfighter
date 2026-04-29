@@ -292,12 +292,10 @@ export async function startEngine() {
     network.startStateLoop(() => buildLocalState(player));
 
     // ---- Bot fill: host spawns AI bots to fill empty slots. -------
-    // Host = the player with the lexicographically smallest id (stable across
-    // all clients without needing server coordination). When a host leaves,
-    // the next-smallest id becomes host; their bots take over.
-    const allIds = [network.you.id, ...network.players.map((p) => p.id)].sort();
-    const isHost = allIds[0] === network.you.id;
-    if (isHost) {
+    // Host = first player in JOIN ORDER (the room creator). If the host
+    // leaves, the next player becomes host automatically because everyone
+    // reads the same ordered roster from network.getHost().
+    if (network.isHost()) {
       const targetCount = 4;
       const allPlayersHere = [network.you, ...network.players];
       const redCount  = allPlayersHere.filter((p) => p.team === 'red').length;

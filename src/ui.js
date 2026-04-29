@@ -329,8 +329,6 @@ export function showClassSelect(classes, network = null) {
   /* ----------------------- lobby setup ------------------------- */
   let lobbyInited = false;
   let unsubs = [];     // network listener cleanup handles
-  let roster = [];     // current room roster (everyone, including you)
-  let isHost = false;
   function initLobby() {
     if (lobbyInited || !network) return;
     lobbyInited = true;
@@ -346,12 +344,9 @@ export function showClassSelect(classes, network = null) {
       roomList = rooms;
       renderRoomList();
     }));
-    unsubs.push(network.on('playerJoined', (p) => {
-      if (joinedRoomId) { roster.push(p); renderRoster(); }
-    }));
-    unsubs.push(network.on('playerLeft', (id) => {
-      if (joinedRoomId) { roster = roster.filter((p) => p.id !== id); renderRoster(); }
-    }));
+    // Roster is owned by the network module — we just re-render on changes.
+    unsubs.push(network.on('playerJoined', () => { if (joinedRoomId) renderRoster(); }));
+    unsubs.push(network.on('playerLeft',   () => { if (joinedRoomId) renderRoster(); }));
 
     document.getElementById('createRoomBtn').onclick = async () => {
       const name = document.getElementById('roomName').value.trim() || 'New Room';
@@ -361,11 +356,10 @@ export function showClassSelect(classes, network = null) {
         const res = await network.createRoom({ name, mode: roomMode, playerName, plane: selected });
         joinedRoomId = res.roomId;
         joinedMode = roomMode;
-        roster = [network.you];
-        status.innerHTML = `IN ROOM <b>${name}</b> (${roomMode === 'ffa' ? 'FREE-FOR-ALL' : '2V2 TEAMS'})<br>YOU ARE THE HOST.`;
+        status.innerHTML = `IN ROOM <b>${escapeHtml(name)}</b> (${roomMode === 'ffa' ? 'FREE-FOR-ALL' : '2V2 TEAMS'})<br>YOU ARE THE HOST.`;
         renderRoster();
       } catch (err) {
-        status.textContent = 'CREATE FAILED: ' + err.message;
+        status.innerHTML = `<span style="color:#ff8a8a;">CREATE FAILED: ${escapeHtml(err.message)}</span>`;
       }
     };
   }
@@ -373,11 +367,13 @@ export function showClassSelect(classes, network = null) {
   function renderRoster() {
     const panel = document.getElementById('lobbyRoster');
     const list = document.getElementById('rosterList');
-    if (!panel || !list) return;
+    if (!panel || !list || !network) return;
+    const roster = network.roster;
     panel.style.display = roster.length ? 'block' : 'none';
-    // Host = lexicographically smallest id (matches engine.js's bot-host logic).
-    const hostId = roster.length ? [...roster].map((p) => p.id).sort()[0] : null;
-    isHost = hostId === network.you?.id;
+    // Host = first player in JOIN ORDER (room creator). On host departure,
+    // the next player in line becomes host automatically.
+    const hostId = network.getHost()?.id || null;
+    const youAreHost = network.isHost();
     list.innerHTML = roster.map((p) => {
       const isYou = p.id === network.you?.id;
       const teamColor = p.team === 'red' || p.team === 'blue'
@@ -397,7 +393,7 @@ export function showClassSelect(classes, network = null) {
     // Update LAUNCH button visibility.
     const launchBtn = document.getElementById('launchBtn');
     if (launchBtn) {
-      if (mode === 'mp' && !isHost) {
+      if (mode === 'mp' && !youAreHost) {
         launchBtn.textContent = 'WAITING FOR HOST…';
         launchBtn.disabled = true;
         launchBtn.style.opacity = '0.5';
@@ -424,18 +420,19 @@ export function showClassSelect(classes, network = null) {
       row.className = 'room-row' + (r.players >= r.maxPlayers ? ' full' : '');
       row.innerHTML = `<span>${escapeHtml(r.name)}</span><span style="opacity:0.6;">${r.players}/${r.maxPlayers}</span>`;
       row.onclick = async () => {
+        if (joinedRoomId) return;                 // already in a room — ignore further clicks
         if (r.players >= r.maxPlayers) return;
         const playerName = document.getElementById('playerName').value.trim() || 'Pilot';
         try {
-          const res = await network.joinRoom({ roomId: r.id, playerName, plane: selected });
+          await network.joinRoom({ roomId: r.id, playerName, plane: selected });
           joinedRoomId = r.id;
           joinedMode = r.mode || 'ffa';
-          roster = res.players || [network.you];
           document.getElementById('lobbyStatus').innerHTML =
             `IN ROOM <b>${escapeHtml(r.name)}</b> (${joinedMode === 'ffa' ? 'FFA' : '2V2'})<br>WAITING FOR HOST TO LAUNCH.`;
           renderRoster();
         } catch (err) {
-          document.getElementById('lobbyStatus').textContent = 'JOIN FAILED: ' + err.message;
+          document.getElementById('lobbyStatus').innerHTML =
+            `<span style="color:#ff8a8a;">JOIN FAILED: ${escapeHtml(err.message)}</span>`;
         }
       };
       el.appendChild(row);
@@ -531,7 +528,7 @@ export function showClassSelect(classes, network = null) {
           '<span style="color:#ff8a8a;">JOIN OR CREATE A ROOM FIRST.</span>';
         return;
       }
-      if (!isHost) return; // disabled state already prevents this, but be safe
+      if (!network.isHost()) return; // disabled state already prevents this, but be safe
       // Broadcast countdown to everyone in the room (including ourselves via
       // the listener path; the host also runs the countdown locally below).
       network.sendEvent({ type: 'match-start', seconds: 3 });

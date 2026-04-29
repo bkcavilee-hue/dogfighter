@@ -29,10 +29,18 @@ export class RoomManager {
     if (this.rooms.size >= MAX_ROOMS) {
       throw new Error('Server full — too many rooms');
     }
+    const trimmedName = (name || 'Room').slice(0, 32).trim();
+    // Reject duplicate names (case-insensitive) so the lobby is unambiguous.
+    const lower = trimmedName.toLowerCase();
+    for (const r of this.rooms.values()) {
+      if (r.name.toLowerCase() === lower) {
+        throw new Error(`Room name "${trimmedName}" is taken`);
+      }
+    }
     const id = randomUUID().slice(0, 8);
     const room = {
       id,
-      name: (name || 'Room').slice(0, 32),
+      name: trimmedName,
       mode,
       maxPlayers: MAX_PLAYERS_PER_ROOM,
       players: [],
