@@ -289,39 +289,26 @@ export function updateAircraft(plane, intent, dt) {
   plane._yawSmoothed += (yawAxisTarget - plane._yawSmoothed) * Math.min(1, yawEase * dt);
   plane._heading += plane._yawSmoothed * THREE.MathUtils.degToRad(s.turnRateDegPerSec) * dt;
 
-  // Pitch is RATE-BASED: while W/S held, the nose moves; when released, the
-  // plane HOLDS its current pitch instead of returning to level. Same input
-  // smoothing as yaw for consistent feel. Clamped to ±80° so you can't fly
-  // straight up/down (which gimbal-locks the heading math).
+  // Pitch is RATE-BASED and UNBOUNDED — holding the pitch key keeps rotating
+  // the nose, so a continuous press traces a full vertical loop:
+  //   0° → 90° (vertical climb) → 180° (inverted, briefly flying backward
+  //   across the top of the loop) → 270° (vertical dive) → 360° (level again).
+  // We wrap into [-π, π] so the value never grows unboundedly.
   const pitchAxisTarget = THREE.MathUtils.clamp(intent.pitch || 0, -1, 1);
   if (plane._pitchSmoothed === undefined) plane._pitchSmoothed = 0;
   const pitchEase = 6.0;
   plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, pitchEase * dt);
   const pitchRateRad = THREE.MathUtils.degToRad(s.pitchRateDegPerSec);
   plane._pitch += plane._pitchSmoothed * pitchRateRad * dt;
-  const PITCH_LIMIT = THREE.MathUtils.degToRad(80);
-  plane._pitch = THREE.MathUtils.clamp(plane._pitch, -PITCH_LIMIT, PITCH_LIMIT);
-
-  // Roll axis (Z/X). Continuous; not clamped — plane can fly fully inverted.
-  const rollAxisTarget = THREE.MathUtils.clamp(intent.roll || 0, -1, 1);
-  if (plane._rollSmoothed === undefined) plane._rollSmoothed = 0;
-  if (plane._roll === undefined) plane._roll = 0;
-  const rollEase = 6.0;
-  plane._rollSmoothed += (rollAxisTarget - plane._rollSmoothed) * Math.min(1, rollEase * dt);
-  const rollRateRad = THREE.MathUtils.degToRad(s.rollRateDegPerSec ?? 220);
-  plane._roll += plane._rollSmoothed * rollRateRad * dt;
-  // Wrap into [-π, π] so the angle never grows unboundedly.
-  if (plane._roll >  Math.PI) plane._roll -= 2 * Math.PI;
-  if (plane._roll < -Math.PI) plane._roll += 2 * Math.PI;
+  if (plane._pitch >  Math.PI) plane._pitch -= 2 * Math.PI;
+  if (plane._pitch < -Math.PI) plane._pitch += 2 * Math.PI;
 
   const qYaw   = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), plane._heading);
   const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), plane._pitch);
-  const qRoll  = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), plane._roll);
-  const qFinal = qYaw.multiply(qPitch).multiply(qRoll);
+  const qFinal = qYaw.multiply(qPitch);
 
   body.setRotation({ x: qFinal.x, y: qFinal.y, z: qFinal.z, w: qFinal.w }, true);
 
-  // Forward velocity is unchanged by roll (roll is around the forward axis).
   const forward = _v3.set(0, 0, -1).applyQuaternion(qFinal);
   body.setLinvel({ x: forward.x * speed, y: forward.y * speed, z: forward.z * speed }, true);
   body.setAngvel({ x: 0, y: 0, z: 0 }, true);

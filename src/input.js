@@ -6,8 +6,6 @@ export const input = {
   dive: false,      // S or ArrowDown
   left: false,      // A or ArrowLeft
   right: false,     // D or ArrowRight
-  rollL: false,     // Z (continuous roll left)
-  rollR: false,     // X (continuous roll right)
   boost: false,     // Space
   fire: false,      // E or LMB
   missile: false,   // Q (held)
@@ -72,8 +70,6 @@ function keyDown(code) {
       if (!input.missile) input.missilePressed = true;
       input.missile = true;
       break;
-    case 'KeyZ': input.rollL = true; break;
-    case 'KeyX': input.rollR = true; break;
   }
 }
 
@@ -90,8 +86,6 @@ function keyUp(code) {
     case 'Space':      input.boost = false; break;
     case 'KeyE':       input.fire = false; break;
     case 'KeyQ':       input.missile = false; break;
-    case 'KeyZ':       input.rollL = false; break;
-    case 'KeyX':       input.rollR = false; break;
   }
 }
 
