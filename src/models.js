@@ -157,6 +157,22 @@ export function bakeIslandHeightmap(width, depth, segments, maxRayHeight = 2000)
   island.traverse((obj) => { if (obj.isMesh) meshes.push(obj); });
   if (meshes.length === 0) return null;
 
+  // Bail out if the mesh is too complex to raycast synchronously without
+  // freezing the page (e.g. high-poly city / metropolis GLBs). The
+  // procedural heightmap from arena.js stays in place so collision still
+  // works, just less precisely.
+  let triCount = 0;
+  for (const m of meshes) {
+    const geom = m.geometry;
+    if (!geom) continue;
+    if (geom.index) triCount += geom.index.count / 3;
+    else if (geom.attributes?.position) triCount += geom.attributes.position.count / 3;
+  }
+  if (triCount > 80000) {
+    console.warn(`[island] skipping heightmap bake (${Math.round(triCount)} triangles — too slow). Procedural heightmap remains.`);
+    return null;
+  }
+
   // Compute the island's horizontal bounding circle so we only raycast
   // grid points inside it; outside is sea level (0).
   const box = new THREE.Box3().setFromObject(island);

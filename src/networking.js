@@ -40,7 +40,12 @@ export class Network {
 
   connect() {
     if (this.socket) return;
-    this.socket = io(resolveServerURL(), { transports: ['websocket'] });
+    // Try websocket first, fall back to polling. Some proxies/CDNs strip
+    // WebSocket upgrades; without polling fallback the client just hangs.
+    this.socket = io(resolveServerURL(), {
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 5,
+    });
 
     this.socket.on('connect', () => {
       this.connected = true;
