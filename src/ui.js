@@ -659,12 +659,9 @@ export function updateMinimap(player, others) {
     if (!p.alive) continue;
     const t = p.body.translation();
     const { px, py } = project(t.x, t.z);
-    // Color by team RELATIVE to the player: same team = blue (friendly),
-    // different team = red (enemy). In FFA every team id is unique so all
-    // others end up red, which is correct.
     const isFriendly = player && p.team === player.team;
     const color = isFriendly ? '#4caaff' : '#ff7b6e';
-    drawHeadingTriangle(_ctx, px, py, p._heading || 0, 4.5, color);
+    drawHeadingTriangle(_ctx, px, py, headingOf(p), 4.5, color);
 
     // Distance label (3D distance, formatted compactly). Number naturally
     // gets smaller as the target approaches.
@@ -684,8 +681,18 @@ export function updateMinimap(player, others) {
   if (player && player.alive) {
     const t = player.body.translation();
     const { px, py } = project(t.x, t.z);
-    drawHeadingTriangle(_ctx, px, py, player._heading || 0, 6, '#a8ffb8', '#ffffff');
+    drawHeadingTriangle(_ctx, px, py, headingOf(player), 6, '#a8ffb8', '#ffffff');
   }
+}
+
+/** Derive a 2D top-down heading angle from a plane's body rotation. */
+const _headingQ = new THREE.Quaternion();
+const _headingF = new THREE.Vector3();
+function headingOf(plane) {
+  const r = plane.body.rotation();
+  _headingQ.set(r.x, r.y, r.z, r.w);
+  _headingF.set(0, 0, -1).applyQuaternion(_headingQ);
+  return Math.atan2(-_headingF.x, -_headingF.z);
 }
 
 /**

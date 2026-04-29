@@ -53,8 +53,6 @@ export function createRemotePlane(player) {
     alive: true,
     invincibleTimer: 0,
     isPlayer: false,
-    _heading: 0,
-    _pitch: 0,
     _maneuver: null,
   };
 }
@@ -69,8 +67,6 @@ export function applyRemoteState(remote, state) {
   remote.alive = state.alive ?? true;
   remote.team = state.team ?? remote.team;
   remote.score = state.score ?? remote.score;
-  remote._heading = state.heading ?? remote._heading;
-  remote._pitch = state.pitch ?? remote._pitch;
   if (state.name && state.name !== remote.name) remote.name = state.name;
 }
 
@@ -80,20 +76,19 @@ export function tickRemotePlane(remote, dt) {
   if (!t) return;
   const p = remote.prevState || t;
 
-  // Time since we received target state, clamped to one network interval.
   const NET_INTERVAL = 1 / 20; // server tick
   const age = (performance.now() - remote.targetReceivedAt) / 1000;
   const alpha = Math.min(1, age / NET_INTERVAL);
 
-  // Position: linear interp from prev → target.
+  // Position: linear interp.
   const px = p.x + (t.x - p.x) * alpha;
   const py = p.y + (t.y - p.y) * alpha;
   const pz = p.z + (t.z - p.z) * alpha;
 
-  // Rotation: slerp between two quaternions reconstructed from heading/pitch.
-  const aQ = quatFromHeadingPitch(_qa, p.heading, p.pitch);
-  const bQ = quatFromHeadingPitch(_qb, t.heading, t.pitch);
-  _q.copy(aQ).slerp(bQ, alpha);
+  // Rotation: slerp between full quaternions sent over the wire.
+  _qa.set(p.qx ?? 0, p.qy ?? 0, p.qz ?? 0, p.qw ?? 1);
+  _qb.set(t.qx ?? 0, t.qy ?? 0, t.qz ?? 0, t.qw ?? 1);
+  _q.copy(_qa).slerp(_qb, alpha);
 
   remote.mesh.position.set(px, py, pz);
   remote.mesh.quaternion.copy(_q);
@@ -101,28 +96,22 @@ export function tickRemotePlane(remote, dt) {
   // Update the fake body so range/lock helpers work.
   remote.body._position.set(px, py, pz);
   remote.body._rotation.set(_q.x, _q.y, _q.z, _q.w);
-  // Estimate velocity from prev → target diff.
   const ivd = NET_INTERVAL > 0 ? 1 / NET_INTERVAL : 0;
   remote.body._velocity.set(
     (t.x - p.x) * ivd, (t.y - p.y) * ivd, (t.z - p.z) * ivd,
   );
 
   remote.speed = remote.body._velocity.length();
-
-  if (remote.alive) {
-    remote.mesh.visible = true;
-  } else {
-    remote.mesh.visible = false;
-  }
+  remote.mesh.visible = !!remote.alive;
 }
 
 /** Build the network state payload for the LOCAL plane. */
 export function buildLocalState(plane) {
   const t = plane.body.translation();
+  const r = plane.body.rotation();
   return {
     x: t.x, y: t.y, z: t.z,
-    heading: plane._heading || 0,
-    pitch: plane._pitch || 0,
+    qx: r.x, qy: r.y, qz: r.z, qw: r.w,
     HP: plane.HP,
     alive: plane.alive,
     score: plane.score,
@@ -133,13 +122,6 @@ export function buildLocalState(plane) {
 }
 
 /* ------------------------- helpers ----------------------------------- */
-function quatFromHeadingPitch(out, heading = 0, pitch = 0) {
-  const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), heading);
-  const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitch);
-  out.copy(qy).multiply(qx);
-  return out;
-}
-
 /** Adapter so remote planes look like local planes for translation/rotation/linvel. */
 function makeFakeBody() {
   const _pos = new THREE.Vector3();

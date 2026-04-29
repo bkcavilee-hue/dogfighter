@@ -166,7 +166,10 @@ export function createAircraft({
 
 const _v3 = new THREE.Vector3();
 const _q  = new THREE.Quaternion();
-const _euler = new THREE.Euler();
+const _qa = new THREE.Quaternion();
+const _qb = new THREE.Quaternion();
+const _axisX = new THREE.Vector3(1, 0, 0); // local right (pitch axis)
+const _axisY = new THREE.Vector3(0, 1, 0); // local up    (yaw axis)
 
 /**
  * Arcade flight model — driven by an `intent` object so the same code drives
@@ -208,7 +211,7 @@ export function updateAircraft(plane, intent, dt) {
   const s = plane.stats;
   const body = plane.body;
 
-  // --- Boost (always tickable) ----------------------------------------
+  // --- Boost ----------------------------------------------------------
   const wantsBoost = !!intent.boost && plane.boost > 0;
   plane.boostActive = wantsBoost;
   if (wantsBoost) {
@@ -222,14 +225,9 @@ export function updateAircraft(plane, intent, dt) {
   if (plane._maneuverCD > 0) plane._maneuverCD -= dt;
   if (plane.invincibleTimer > 0) plane.invincibleTimer -= dt;
 
-  // --- Initialize heading on first call -------------------------------
-  if (plane._heading === undefined) {
-    const r0 = body.rotation();
-    const q0 = new THREE.Quaternion(r0.x, r0.y, r0.z, r0.w);
-    const f0 = _v3.set(0, 0, -1).applyQuaternion(q0);
-    plane._heading = Math.atan2(-f0.x, -f0.z);
-    plane._pitch = 0;
-  }
+  // --- Read current orientation as a quaternion ----------------------
+  const r = body.rotation();
+  const q = _q.set(r.x, r.y, r.z, r.w);
 
   // --- Trigger a new maneuver -----------------------------------------
   if (!plane._maneuver && plane._maneuverCD <= 0) {
@@ -247,22 +245,12 @@ export function updateAircraft(plane, intent, dt) {
   // --- Execute maneuver (mesh-only rotation; body keeps cruising) ----
   if (plane._maneuver) {
     const m = plane._maneuver;
-    // Visual offset goes 0 → 2π over the duration. Engine picks this up.
     m.visualAngle = (1 - m.timer / m.duration) * Math.PI * 2;
 
-    // Body keeps the heading/pitch we already had. Build the same forward
-    // we'd build during normal flight so velocity stays consistent.
-    const qYaw   = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), plane._heading);
-    const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), plane._pitch);
-    const qFinal = qYaw.multiply(qPitch);
-    body.setRotation({ x: qFinal.x, y: qFinal.y, z: qFinal.z, w: qFinal.w }, true);
-
-    const fwd = _v3.set(0, 0, -1).applyQuaternion(qFinal);
+    const fwd = _v3.set(0, 0, -1).applyQuaternion(q);
     let vx = fwd.x * speed, vy = fwd.y * speed, vz = fwd.z * speed;
-
-    // Dodge: add a lateral velocity in the local +X (right) direction.
     if (m.dodgeSpeed) {
-      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(qFinal);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
       const push = m.dodgeSpeed * m.dodgeDir;
       vx += right.x * push;
       vy += right.y * push;
@@ -272,44 +260,37 @@ export function updateAircraft(plane, intent, dt) {
     body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
     m.timer -= dt;
-    if (m.timer <= 0) {
-      // 360° → ends at identity offset; nothing to snap.
-      plane._maneuver = null;
-    }
+    if (m.timer <= 0) plane._maneuver = null;
     plane.speed = speed;
     return;
   }
 
-  // --- Normal flight: yaw + pitch -------------------------------------
-  // Ramp the yaw input toward the held value so quick taps produce small
-  // corrections (great for aiming) while held A/D still reaches full turn.
+  // --- Normal flight: pitch + yaw applied as LOCAL-FRAME rotations ---
+  // Quaternion-only model — no Euler heading/pitch state is kept. This
+  // means continuous pitch input traces a real vertical loop (no clamp
+  // needed) and yaw always feels right relative to the cockpit.
   const yawAxisTarget = THREE.MathUtils.clamp(intent.yaw || 0, -1, 1);
   if (plane._yawSmoothed === undefined) plane._yawSmoothed = 0;
-  const yawEase = 6.0; // higher = snappier; ~0.17s to reach ~63% of target
-  plane._yawSmoothed += (yawAxisTarget - plane._yawSmoothed) * Math.min(1, yawEase * dt);
-  plane._heading += plane._yawSmoothed * THREE.MathUtils.degToRad(s.turnRateDegPerSec) * dt;
+  plane._yawSmoothed += (yawAxisTarget - plane._yawSmoothed) * Math.min(1, 6.0 * dt);
 
-  // Pitch is RATE-BASED and UNBOUNDED — holding the pitch key keeps rotating
-  // the nose, so a continuous press traces a full vertical loop:
-  //   0° → 90° (vertical climb) → 180° (inverted, briefly flying backward
-  //   across the top of the loop) → 270° (vertical dive) → 360° (level again).
-  // We wrap into [-π, π] so the value never grows unboundedly.
   const pitchAxisTarget = THREE.MathUtils.clamp(intent.pitch || 0, -1, 1);
   if (plane._pitchSmoothed === undefined) plane._pitchSmoothed = 0;
-  const pitchEase = 6.0;
-  plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, pitchEase * dt);
-  const pitchRateRad = THREE.MathUtils.degToRad(s.pitchRateDegPerSec);
-  plane._pitch += plane._pitchSmoothed * pitchRateRad * dt;
-  if (plane._pitch >  Math.PI) plane._pitch -= 2 * Math.PI;
-  if (plane._pitch < -Math.PI) plane._pitch += 2 * Math.PI;
+  plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, 6.0 * dt);
 
-  const qYaw   = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), plane._heading);
-  const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), plane._pitch);
-  const qFinal = qYaw.multiply(qPitch);
+  const yawDelta   = plane._yawSmoothed   * THREE.MathUtils.degToRad(s.turnRateDegPerSec)  * dt;
+  const pitchDelta = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
 
-  body.setRotation({ x: qFinal.x, y: qFinal.y, z: qFinal.z, w: qFinal.w }, true);
+  // Apply pitch then yaw in the plane's LOCAL frame. q.multiply(dq) means
+  // "rotate by dq in q's local axes", which is exactly what we want for
+  // intuitive flight controls regardless of orientation.
+  const dqPitch = _qa.setFromAxisAngle(_axisX, pitchDelta);
+  const dqYaw   = _qb.setFromAxisAngle(_axisY, yawDelta);
+  q.multiply(dqPitch).multiply(dqYaw);
+  q.normalize(); // guard against drift
 
-  const forward = _v3.set(0, 0, -1).applyQuaternion(qFinal);
+  body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+
+  const forward = _v3.set(0, 0, -1).applyQuaternion(q);
   body.setLinvel({ x: forward.x * speed, y: forward.y * speed, z: forward.z * speed }, true);
   body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 

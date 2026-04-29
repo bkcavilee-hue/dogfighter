@@ -67,6 +67,10 @@ export function createAIBrain(difficulty = 'veteran') {
 }
 
 const _v = new THREE.Vector3();
+const _aimVec = new THREE.Vector3();
+const _fwdVec = new THREE.Vector3();
+const _qA = new THREE.Quaternion();
+const _qInv = new THREE.Quaternion();
 
 export function updateAI(plane, brain, allPlanes, dt) {
   const intent = { yaw: 0, pitch: 0, boost: false, fire: false, missileFire: false };
@@ -87,12 +91,19 @@ export function updateAI(plane, brain, allPlanes, dt) {
     Math.abs(pos.x) > halfW - edgeBuffer ||
     Math.abs(pos.z) > halfD - edgeBuffer;
   const tooHigh = pos.y > ARENA.maxAltitude - ceilingBuffer;
+
+  // Cache AI's quaternion + its inverse for local-frame aim math.
+  const r = plane.body.rotation();
+  _qA.set(r.x, r.y, r.z, r.w);
+  _qInv.copy(_qA).invert();
+
   if (nearEdge) {
-    const desiredHeading = Math.atan2(-(0 - pos.x), -(0 - pos.z));
-    let yawDelta = desiredHeading - (plane._heading ?? 0);
-    while (yawDelta > Math.PI) yawDelta -= 2 * Math.PI;
-    while (yawDelta < -Math.PI) yawDelta += 2 * Math.PI;
-    intent.yaw = THREE.MathUtils.clamp(yawDelta * 2.0, -1, 1);
+    // Steer toward origin: express toward-origin in local frame; .x tells us
+    // whether origin is to our right (+) or left (-) — flip sign so positive
+    // yaw means "turn left" (matches the player's A key).
+    const toOrigin = _aimVec.set(-pos.x, 0, -pos.z).normalize();
+    toOrigin.applyQuaternion(_qInv);
+    intent.yaw = THREE.MathUtils.clamp(-toOrigin.x * 2.0, -1, 1);
     intent.pitch = tooHigh ? -1 : 0;
     intent.boost = false;
     return intent;
@@ -158,31 +169,31 @@ export function updateAI(plane, brain, allPlanes, dt) {
 
   const tv = target.body.linvel();
   const leadTime = dist / Math.max(plane.stats.maxSpeed, 1) * 0.6;
-  const aimX = tp.x + tv.x * leadTime;
-  const aimY = tp.y + tv.y * leadTime;
-  const aimZ = tp.z + tv.z * leadTime;
+  const aimX = tp.x + tv.x * leadTime - pp.x;
+  const aimY = tp.y + tv.y * leadTime - pp.y;
+  const aimZ = tp.z + tv.z * leadTime - pp.z;
 
-  const adx = aimX - pp.x;
-  const ady = aimY - pp.y;
-  const adz = aimZ - pp.z;
-  const aimHoriz = Math.sqrt(adx * adx + adz * adz);
-
-  const desiredHeading = Math.atan2(-adx, -adz);
-  let yawDelta = desiredHeading - (plane._heading ?? 0);
-  while (yawDelta > Math.PI) yawDelta -= 2 * Math.PI;
-  while (yawDelta < -Math.PI) yawDelta += 2 * Math.PI;
-  intent.yaw = THREE.MathUtils.clamp(yawDelta * cfg.yawAimGain, -1, 1);
-
-  const desiredPitch = Math.atan2(ady, Math.max(aimHoriz, 1));
-  const pitchDelta = desiredPitch - (plane._pitch ?? 0);
-  intent.pitch = THREE.MathUtils.clamp(pitchDelta * cfg.pitchAimGain, -1, 1);
+  // Express the aim direction in the plane's LOCAL frame. Components:
+  //   localAim.x: target's right offset  (+ = to our right)
+  //   localAim.y: target's up    offset  (+ = above us)
+  //   localAim.z: target's depth offset  (- = in front, since fwd = -Z)
+  // Yaw input is sign-flipped because intent.yaw=+1 means "turn left", but
+  // a target on our LEFT has localAim.x < 0.
+  const localAim = _aimVec.set(aimX, aimY, aimZ).normalize();
+  localAim.applyQuaternion(_qInv);
+  intent.yaw   = THREE.MathUtils.clamp(-localAim.x * cfg.yawAimGain, -1, 1);
+  intent.pitch = THREE.MathUtils.clamp( localAim.y * cfg.pitchAimGain, -1, 1);
 
   intent.boost = dist > cfg.boostRange;
 
   // --- Gunfire ---------------------------------------------------------
   const inRange = dist < cfg.fireRange;
-  const inCone = Math.abs(yawDelta) < THREE.MathUtils.degToRad(cfg.fireConeDeg) &&
-                 Math.abs(pitchDelta) < THREE.MathUtils.degToRad(cfg.fireConeDeg);
+  // Angle between current forward and the aim direction. Below the cone
+  // threshold and we shoot.
+  const fwd = _fwdVec.set(0, 0, -1).applyQuaternion(_qA);
+  const cosAim = THREE.MathUtils.clamp(fwd.dot(_aimVec.set(aimX, aimY, aimZ).normalize()), -1, 1);
+  const aimAngle = Math.acos(cosAim);
+  const inCone = aimAngle < THREE.MathUtils.degToRad(cfg.fireConeDeg);
   if (inRange && inCone) brain.fireHoldTimer = 0.15;
   if (brain.fireHoldTimer > 0) {
     brain.fireHoldTimer -= dt;

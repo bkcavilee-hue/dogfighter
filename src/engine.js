@@ -387,8 +387,6 @@ export async function startEngine() {
         bestPos = slot;
       }
     }
-    plane._heading = plane.team === 'red' ? Math.PI : 0;
-    plane._pitch = 0;
     return bestPos;
   };
 
@@ -445,24 +443,19 @@ export async function startEngine() {
       }
 
       // Soft turn assist: when soft-locked AND the player isn't actively
-      // steering, gently bias the plane toward the target. Strength scales
-      // with lockConfidence so passive targeting is subtle but a fully-locked
-      // pursuit auto-tracks.
+      // steering, gently bias the plane toward the target. Computed in the
+      // player's local frame so it works at any orientation (even inverted).
       if (playerSoftLock && Math.abs(playerIntent.yaw) < 0.1 && Math.abs(playerIntent.pitch) < 0.1) {
         const tp = playerSoftLock.body.translation();
         const pp = player.body.translation();
-        const dx = tp.x - pp.x, dy = tp.y - pp.y, dz = tp.z - pp.z;
-        const horiz = Math.sqrt(dx * dx + dz * dz);
-        const desiredHeading = Math.atan2(-dx, -dz);
-        let yawDelta = desiredHeading - (player._heading ?? 0);
-        while (yawDelta > Math.PI) yawDelta -= 2 * Math.PI;
-        while (yawDelta < -Math.PI) yawDelta += 2 * Math.PI;
-        const desiredPitch = Math.atan2(dy, Math.max(horiz, 1));
-        const pitchDelta = desiredPitch - (player._pitch ?? 0);
+        const r  = player.body.rotation();
+        const q  = new THREE.Quaternion(r.x, r.y, r.z, r.w).invert();
+        const localAim = new THREE.Vector3(tp.x - pp.x, tp.y - pp.y, tp.z - pp.z).normalize();
+        localAim.applyQuaternion(q);
         const assistStrength = 0.35 + 0.45 * playerWeapon.lockConfidence; // 0.35 → 0.8
         const cap = 0.18 + 0.20 * playerWeapon.lockConfidence;             // 0.18 → 0.38
-        playerIntent.yaw   = THREE.MathUtils.clamp(yawDelta * assistStrength, -cap, cap);
-        playerIntent.pitch = THREE.MathUtils.clamp(pitchDelta * assistStrength, -cap, cap);
+        playerIntent.yaw   = THREE.MathUtils.clamp(-localAim.x * assistStrength, -cap, cap);
+        playerIntent.pitch = THREE.MathUtils.clamp( localAim.y * assistStrength, -cap, cap);
       }
 
       updateAircraft(player, playerIntent, FIXED_DT);
