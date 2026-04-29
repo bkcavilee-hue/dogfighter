@@ -18,7 +18,8 @@
     "simplex-noise": "^4.0.3",
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.8.3",
-    "three": "^0.164.0"
+    "three": "^0.164.0",
+    "three-mesh-bvh": "^0.9.9"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

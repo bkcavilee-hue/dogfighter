@@ -35,20 +35,20 @@ import { createRemotePlane, applyRemoteState, tickRemotePlane, buildLocalState }
 const FIXED_DT = 1 / 60;
 const _maneuverQ = new THREE.Quaternion();
 
-// Spawn slot table (shared across solo + MP). Used by initial placement and
-// by the spawnFor() respawn picker.
+// Spawn slot table (shared across solo + MP). Sized for the 2500m arena
+// so planes spawn well within the playable area but not on top of each other.
 const SPAWNS = {
   red:  [
-    { x:    0, y: 500, z:  900 },
-    { x:  600, y: 520, z:  700 },
-    { x: -600, y: 520, z:  700 },
-    { x:    0, y: 540, z: 1200 },
+    { x:    0, y: 500, z:  650 },
+    { x:  400, y: 520, z:  500 },
+    { x: -400, y: 520, z:  500 },
+    { x:    0, y: 540, z:  900 },
   ],
   blue: [
-    { x:    0, y: 500, z: -900 },
-    { x:  600, y: 520, z: -700 },
-    { x: -600, y: 520, z: -700 },
-    { x:    0, y: 540, z: -1200 },
+    { x:    0, y: 500, z: -650 },
+    { x:  400, y: 520, z: -500 },
+    { x: -400, y: 520, z: -500 },
+    { x:    0, y: 540, z: -900 },
   ],
 };
 
@@ -146,7 +146,7 @@ export async function startEngine() {
   const playerTeam = isMultiplayer ? (network.you?.team || 'red') : 'red';
   const player = createAircraft({
     type: playerClass,
-    position: { x: 0, y: 500, z: 900 },
+    position: { x: 0, y: 500, z: 650 },
     team: playerTeam,
     isPlayer: true,
   });
@@ -156,8 +156,8 @@ export async function startEngine() {
 
   // In SOLO mode: spawn AI enemies. In MP mode: rely on remote players.
   const enemies = isMultiplayer ? [] : [
-    createAircraft({ type: 'striker', position: { x:  220, y: 500, z: -700 }, team: 'blue' }),
-    createAircraft({ type: 'bruiser', position: { x: -350, y: 520, z: -500 }, team: 'blue' }),
+    createAircraft({ type: 'striker', position: { x:  300, y: 500, z: -550 }, team: 'blue' }),
+    createAircraft({ type: 'bruiser', position: { x: -300, y: 520, z: -650 }, team: 'blue' }),
   ];
   for (const e of enemies) {
     scene.add(e.mesh);

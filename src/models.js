@@ -4,6 +4,14 @@
 // back to the placeholder geometry from aircraft.js.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+
+// Patch Three.js to use three-mesh-bvh for accelerated raycasting. Geometries
+// that have called `computeBoundsTree()` get O(log N) raycast performance,
+// which is what makes the heightmap bake against high-poly arena GLBs viable.
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const MODEL_PATHS = {
   interceptor: '/assets/models/interceptor.glb',
@@ -121,6 +129,16 @@ export async function preloadArenaModels() {
       if (key === 'island') {
         const baseY = newBox.min.y;
         root.position.y -= baseY;
+        // Build BVH on every mesh in the island so raycast-based collision
+        // baking is fast enough to run synchronously on load.
+        let bvhCount = 0;
+        root.traverse((obj) => {
+          if (obj.isMesh && obj.geometry) {
+            obj.geometry.computeBoundsTree();
+            bvhCount++;
+          }
+        });
+        if (bvhCount) console.log(`[island] BVH built on ${bvhCount} mesh(es)`);
       } else {
         root.position.y = cfg.lift;
       }
@@ -157,21 +175,7 @@ export function bakeIslandHeightmap(width, depth, segments, maxRayHeight = 2000)
   island.traverse((obj) => { if (obj.isMesh) meshes.push(obj); });
   if (meshes.length === 0) return null;
 
-  // Bail out if the mesh is too complex to raycast synchronously without
-  // freezing the page (e.g. high-poly city / metropolis GLBs). The
-  // procedural heightmap from arena.js stays in place so collision still
-  // works, just less precisely.
-  let triCount = 0;
-  for (const m of meshes) {
-    const geom = m.geometry;
-    if (!geom) continue;
-    if (geom.index) triCount += geom.index.count / 3;
-    else if (geom.attributes?.position) triCount += geom.attributes.position.count / 3;
-  }
-  if (triCount > 80000) {
-    console.warn(`[island] skipping heightmap bake (${Math.round(triCount)} triangles — too slow). Procedural heightmap remains.`);
-    return null;
-  }
+  // (BVH built at load time keeps raycasts fast even on high-poly GLBs.)
 
   // Compute the island's horizontal bounding circle so we only raycast
   // grid points inside it; outside is sea level (0).

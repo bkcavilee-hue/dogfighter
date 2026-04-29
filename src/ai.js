@@ -9,6 +9,7 @@
 // AI doesn't read keyboard. It reads the world and writes an intent.
 import * as THREE from 'three';
 import { findMissileLock, MISSILE } from './missiles.js';
+import { ARENA } from './arena.js';
 
 // Difficulty presets. Each AI has one of these baked in via createAIBrain.
 export const DIFFICULTY = {
@@ -74,6 +75,27 @@ export function updateAI(plane, brain, allPlanes, dt) {
     return intent;
   }
   const cfg = brain.cfg;
+
+  // --- Boundary check: if near the arena edge, override yaw to turn back
+  //     toward center. Prevents AI from flying out of bounds.
+  const pos = plane.body.translation();
+  const halfW = ARENA.width / 2;
+  const halfD = ARENA.depth / 2;
+  const edgeBuffer = 250; // m — start steering back when this close to the edge
+  const nearEdge =
+    Math.abs(pos.x) > halfW - edgeBuffer ||
+    Math.abs(pos.z) > halfD - edgeBuffer;
+  if (nearEdge) {
+    // Compute desired heading toward origin and override yaw input.
+    const desiredHeading = Math.atan2(-(0 - pos.x), -(0 - pos.z));
+    let yawDelta = desiredHeading - (plane._heading ?? 0);
+    while (yawDelta > Math.PI) yawDelta -= 2 * Math.PI;
+    while (yawDelta < -Math.PI) yawDelta += 2 * Math.PI;
+    intent.yaw = THREE.MathUtils.clamp(yawDelta * 2.0, -1, 1);
+    intent.pitch = 0; // level out
+    intent.boost = false;
+    return intent;
+  }
 
   // --- Damage detection -----------------------------------------------
   if (brain.lastHP !== null && plane.HP < brain.lastHP) {

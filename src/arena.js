@@ -6,8 +6,8 @@ import { createNoise2D } from 'simplex-noise';
 import { RAPIER, createRigidBody, createCollider } from './physics.js';
 
 export const ARENA = {
-  width: 4000,
-  depth: 4000,
+  width: 2500,
+  depth: 2500,
   segments: 96,         // collision heightmap resolution (lower = faster bake)
   maxHeight: 280,       // peak altitude in meters
   seaLevel: 0,
