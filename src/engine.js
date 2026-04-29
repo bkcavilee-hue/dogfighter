@@ -117,6 +117,10 @@ export async function startEngine() {
   ], network);
   const playerClass = lobbyResult.plane;
   const isMultiplayer = lobbyResult.mode === 'mp';
+  // Match mode is fixed for the whole match — pin it now so the MP host
+  // bot-fill block (which references it ~150 lines below) doesn't TDZ on
+  // a still-uninitialized const.
+  const matchModeKey = isMultiplayer ? (lobbyResult.matchMode || 'ffa') : 'ffa';
 
   // Wait for models to be ready before spawning planes.
   await modelLoadPromise;
@@ -343,7 +347,8 @@ export async function startEngine() {
 
   // --- Match state -----------------------------------------------------
   // In MP, the host picks ffa or team2v2 from the lobby. Solo defaults to ffa.
-  const matchModeKey = isMultiplayer ? (lobbyResult.matchMode || 'ffa') : 'ffa';
+  // (matchModeKey is hoisted to the top of startEngine so the MP setup above
+  // can reference it.)
   const match = createMatchState(matchModeKey);
   startMatch(match);
 
