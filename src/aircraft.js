@@ -168,8 +168,10 @@ const _v3 = new THREE.Vector3();
 const _q  = new THREE.Quaternion();
 const _qa = new THREE.Quaternion();
 const _qb = new THREE.Quaternion();
-const _axisX = new THREE.Vector3(1, 0, 0); // local right (pitch axis)
-const _axisY = new THREE.Vector3(0, 1, 0); // local up    (yaw axis)
+const _axisX = new THREE.Vector3(1, 0, 0); // local right   (pitch axis)
+const _axisY = new THREE.Vector3(0, 1, 0); // local up      (yaw axis)
+const _axisZ = new THREE.Vector3(0, 0, 1); // local forward (roll axis)
+const _qc    = new THREE.Quaternion();
 
 /**
  * Arcade flight model — driven by an `intent` object so the same code drives
@@ -277,15 +279,21 @@ export function updateAircraft(plane, intent, dt) {
   if (plane._pitchSmoothed === undefined) plane._pitchSmoothed = 0;
   plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, 6.0 * dt);
 
+  const rollAxisTarget = THREE.MathUtils.clamp(intent.roll || 0, -1, 1);
+  if (plane._rollSmoothed === undefined) plane._rollSmoothed = 0;
+  plane._rollSmoothed += (rollAxisTarget - plane._rollSmoothed) * Math.min(1, 6.0 * dt);
+
   const yawDelta   = plane._yawSmoothed   * THREE.MathUtils.degToRad(s.turnRateDegPerSec)  * dt;
   const pitchDelta = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
+  const rollDelta  = plane._rollSmoothed  * THREE.MathUtils.degToRad(s.rollRateDegPerSec ?? 220) * dt;
 
-  // Apply pitch then yaw in the plane's LOCAL frame. q.multiply(dq) means
-  // "rotate by dq in q's local axes", which is exactly what we want for
-  // intuitive flight controls regardless of orientation.
+  // Apply pitch, yaw, and roll in the plane's LOCAL frame. q.multiply(dq)
+  // means "rotate by dq in q's local axes" — the right behavior for any
+  // orientation including fully inverted flight.
   const dqPitch = _qa.setFromAxisAngle(_axisX, pitchDelta);
   const dqYaw   = _qb.setFromAxisAngle(_axisY, yawDelta);
-  q.multiply(dqPitch).multiply(dqYaw);
+  const dqRoll  = _qc.setFromAxisAngle(_axisZ, rollDelta);
+  q.multiply(dqPitch).multiply(dqYaw).multiply(dqRoll);
   q.normalize(); // guard against drift
 
   body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
