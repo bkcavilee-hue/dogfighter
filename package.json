@@ -1,0 +1,27 @@
+{
+  "name": "dogfighter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:server": "node server/index.js",
+    "dev:all": "concurrently -n vite,server -c blue,magenta \"npm run dev\" \"npm run dev:server\"",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "node server/index.js",
+    "postinstall": "vite build"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.14.0",
+    "express": "^4.19.2",
+    "simplex-noise": "^4.0.3",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.8.3",
+    "three": "^0.164.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "vite": "^5.4.0"
+  }
+}

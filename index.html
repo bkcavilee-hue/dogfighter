@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DogFighter</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #06121f; font-family: 'Inter', system-ui, sans-serif; color: #cfe; }
+      canvas { display: block; }
+
+      #loading {
+        position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+        background: #06121f; z-index: 1000; font-family: monospace; letter-spacing: 0.2em;
+        color: #4cf; font-size: 14px;
+      }
+      #loading.hidden { display: none; }
+      #loading .spinner {
+        width: 28px; height: 28px; border: 2px solid #4cf; border-right-color: transparent;
+        border-radius: 50%; margin-right: 12px; animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      /* Shared HUD bar styles (referenced from src/ui.js) */
+      .stat { display: flex; justify-content: space-between; font-size: 11px; margin-top: 6px; opacity: 0.85; }
+      .bar-bg { background: rgba(255,255,255,0.08); height: 6px; border-radius: 3px; overflow: hidden; margin-top: 2px; }
+      .bar-fill { height: 100%; transition: width 0.08s linear; }
+      .health-fill { background: linear-gradient(90deg, #ff4444, #ff8866); }
+      .boost-fill  { background: linear-gradient(90deg, #44aaff, #88ddff); }
+      .heat-fill   { background: linear-gradient(90deg, #ffaa33, #ff3333); }
+      .missile-icons { display: flex; gap: 4px; margin-top: 4px; }
+      .missile-icons .missile { font-size: 18px; opacity: 0.25; }
+      .missile-icons .missile.ready { opacity: 1; color: #ff8866; }
+    </style>
+  </head>
+  <body>
+    <div id="loading"><div class="spinner"></div>BOOTING ARENA</div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
