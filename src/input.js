@@ -91,11 +91,17 @@ function keyUp(code) {
 
 export function initInput() {
   window.addEventListener('keydown', (e) => {
+    // Browser extensions / password managers can dispatch synthetic keydowns
+    // without `code` set — guard so we don't crash startup.
+    if (!e.code) return;
     // Stop arrows from scrolling the page.
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
     keyDown(e.code);
   });
-  window.addEventListener('keyup', (e) => keyUp(e.code));
+  window.addEventListener('keyup', (e) => {
+    if (!e.code) return;
+    keyUp(e.code);
+  });
   window.addEventListener('mousedown', (e) => { if (e.button === 0) input.fire = true; });
   window.addEventListener('mouseup',   (e) => { if (e.button === 0) input.fire = false; });
   window.addEventListener('blur', () => {
