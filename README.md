@@ -2,6 +2,8 @@
 
 3D top-down dogfighting shooter. Three.js + Rapier (WASM) + Socket.IO.
 
+**Play it now:** [dogfighter-production.up.railway.app](https://dogfighter-production.up.railway.app)
+
 ## Local dev
 
 ```bash
