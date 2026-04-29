@@ -17,7 +17,7 @@ import { findMissileLock, fireMissile, updateMissiles, MISSILE_SLOW } from './mi
 import { deployFlares, updateFlares, nearestFlare } from './flares.js';
 import {
   checkTerrainCollision, checkAircraftCollisions, tickRespawns, tickExplosions,
-  respawnPlane, applyDamage,
+  respawnPlane, applyDamage, checkBounds,
 } from './gamestate.js';
 import {
   createHUD, updateHUD, updateMinimap, updateReticle, updateMatchHUD,
@@ -415,10 +415,11 @@ export async function startEngine() {
 
       // --- Player intent (keyboard → flight model) -----------------
       const playerIntent = {
-        yaw: (input.left ? 1 : 0) - (input.right ? 1 : 0),
+        yaw:   (input.left ? 1 : 0) - (input.right ? 1 : 0),
         pitch: (input.climb ? 1 : 0) - (input.dive ? 1 : 0),
+        roll:  (input.rollL ? 1 : 0) - (input.rollR ? 1 : 0),
         boost: input.boost,
-        fire: input.fire,
+        fire:  input.fire,
         loopTap:      consumeLoopTap(),
         rollLeftTap:  consumeRollLeftTap(),
         rollRightTap: consumeRollRightTap(),
@@ -590,6 +591,7 @@ export async function startEngine() {
       updateFlares(flares, scene, FIXED_DT);
 
       checkTerrainCollision(player, heightmap);
+      checkBounds(player, FIXED_DT);
       for (const e of enemies) checkTerrainCollision(e, heightmap);
       // In MP, collisions/respawns for remote players are owned by their
       // own client. We only tick the local player here.

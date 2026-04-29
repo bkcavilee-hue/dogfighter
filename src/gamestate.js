@@ -45,19 +45,48 @@ export function checkTerrainCollision(plane, heightmap) {
   if (altitude <= 0.5) {
     applyDamage(plane, 40, null);
   } else if (altitude < 3.5) {
-    // light scrape — limit to once per ~0.5s by gating with a tiny timer
     plane._scrapeTimer = (plane._scrapeTimer || 0) - 1 / 60;
     if (plane._scrapeTimer <= 0) {
       applyDamage(plane, 5, null);
       plane._scrapeTimer = 0.5;
     }
   }
+}
 
-  // Out-of-bounds (off the arena) → crash.
+/**
+ * Out-of-bounds boundary check with a 10-second courtesy countdown before
+ * damage starts. Returns the OOB state so the HUD can display it.
+ *   plane._oobTimer = seconds remaining before damage starts (10 → 0)
+ *   plane._oob      = bool, currently outside the playable area
+ */
+const OOB_GRACE_SEC = 10;
+const OOB_DAMAGE_PER_SEC = 8;
+export function checkBounds(plane, dt) {
+  if (!plane.alive) {
+    plane._oob = false;
+    plane._oobTimer = OOB_GRACE_SEC;
+    return;
+  }
+  const t = plane.body.translation();
   const halfW = ARENA.width / 2;
   const halfD = ARENA.depth / 2;
-  if (t.x < -halfW || t.x > halfW || t.z < -halfD || t.z > halfD) {
-    applyDamage(plane, 40, null);
+  const oobXZ = t.x < -halfW || t.x > halfW || t.z < -halfD || t.z > halfD;
+  const oobAlt = t.y > ARENA.maxAltitude;
+  const oob = oobXZ || oobAlt;
+  if (oob) {
+    if (!plane._oob) {
+      plane._oob = true;
+      plane._oobTimer = OOB_GRACE_SEC;
+    } else {
+      plane._oobTimer = (plane._oobTimer ?? OOB_GRACE_SEC) - dt;
+      if (plane._oobTimer <= 0) {
+        applyDamage(plane, OOB_DAMAGE_PER_SEC * dt, null);
+        plane._oobTimer = 0;
+      }
+    }
+  } else if (plane._oob) {
+    plane._oob = false;
+    plane._oobTimer = OOB_GRACE_SEC;
   }
 }
 

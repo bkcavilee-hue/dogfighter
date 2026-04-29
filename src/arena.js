@@ -9,8 +9,9 @@ export const ARENA = {
   width: 2500,
   depth: 2500,
   segments: 96,         // collision heightmap resolution (lower = faster bake)
-  maxHeight: 280,       // peak altitude in meters
+  maxHeight: 280,       // peak terrain altitude in meters
   seaLevel: 0,
+  maxAltitude: 800,     // playable ceiling — above this is "out of bounds"
 };
 
 /* -----------------------------------------------------------------------

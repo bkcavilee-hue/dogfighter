@@ -57,7 +57,7 @@ export function createHUD() {
     border-radius: 6px; font-family: monospace; font-size: 12px;
     letter-spacing: 0.08em;
   `;
-  banner.textContent = 'WASD/arrows · Space boost · E fire · Q missile · W×2 loop · A×2/D×2 roll · S×2 flares';
+  banner.textContent = 'WASD · Z/X roll · Space boost · E fire · Q missile · W×2 loop · A×2/D×2 dodge · S×2 flares';
   document.body.appendChild(banner);
 
   // Reticle / lock overlay (full-screen canvas)
@@ -69,6 +69,23 @@ export function createHUD() {
   document.body.appendChild(_reticle);
   _rctx = _reticle.getContext('2d');
   window.addEventListener('resize', _resizeReticle);
+
+  // Out-of-bounds warning overlay
+  const oob = document.createElement('div');
+  oob.id = 'oob-overlay';
+  oob.style.cssText = `
+    position: fixed; inset: 0; z-index: 350; display: none;
+    flex-direction: column; align-items: center; justify-content: flex-start;
+    padding-top: 18vh; pointer-events: none; color: #ff5555;
+    font-family: monospace; letter-spacing: 0.3em;
+    background: radial-gradient(circle at center, transparent 30%, rgba(255,40,40,0.25) 80%);
+  `;
+  oob.innerHTML = `
+    <div style="font-size:18px;animation: pulse 0.8s ease-in-out infinite alternate;">RETURN TO COMBAT AREA</div>
+    <div id="oobCount" style="font-size:64px;font-weight:200;margin-top:6px;line-height:1;">10</div>
+    <style>@keyframes pulse { from { opacity: 0.55; } to { opacity: 1; } }</style>
+  `;
+  document.body.appendChild(oob);
 
   // Death overlay
   const death = document.createElement('div');
@@ -164,8 +181,8 @@ export function createHUD() {
         cursor:pointer;font-family:inherit;
       ">LAUNCH MATCH</button>
       <div style="opacity:0.45;font-size:11px;margin-top:18px;font-family:monospace;letter-spacing:0.15em;line-height:1.6;">
-        WASD OR ARROWS · SPACE BOOST · E FIRE · Q MISSILE<br>
-        W×2 LOOP · A×2/D×2 BARREL ROLL · S×2 FLARES
+        WASD/ARROWS · Z/X ROLL · SPACE BOOST · E FIRE · Q MISSILE<br>
+        W×2 LOOP · A×2/D×2 DODGE · S×2 FLARES
       </div>
     </div>
     <style>
@@ -600,6 +617,18 @@ export function updateHUD(plane) {
   if (!plane.alive) {
     const counter = document.getElementById('respawnCount');
     if (counter) counter.textContent = Math.max(0, Math.ceil(plane.respawnTimer));
+  }
+
+  // Out-of-bounds warning + countdown
+  const oobEl = document.getElementById('oob-overlay');
+  if (oobEl) {
+    if (plane._oob && plane.alive) {
+      oobEl.style.display = 'flex';
+      const cn = document.getElementById('oobCount');
+      if (cn) cn.textContent = Math.max(0, Math.ceil(plane._oobTimer ?? 0));
+    } else {
+      oobEl.style.display = 'none';
+    }
   }
 }
 
