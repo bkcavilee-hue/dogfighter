@@ -146,6 +146,12 @@ export class Network {
     this.socket.emit('game:event', event);
   }
 
+  /** Push state for an array of AI bots owned by this client (host only). */
+  sendBotStates(states) {
+    if (!this.connected || !this.roomId || !states.length) return;
+    this.socket.volatile.emit('game:bot-states', states);
+  }
+
   /* ------------------------ Listeners ------------------------------ */
   on(channel, fn) {
     const set = this._listeners[channel];

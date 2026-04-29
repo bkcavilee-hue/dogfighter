@@ -6,6 +6,7 @@ import { applyDamage } from './gamestate.js';
 import { spawnExplosion } from './fx.js';
 import { sfxMissileLaunch, sfxExplosion } from './audio.js';
 
+// Default missile profile. Used by the player and (unless overridden) by AI.
 export const MISSILE = {
   initialSpeed: 35,
   maxSpeed: 120,                // slower — player boost (125) can outpace briefly, but missile is more agile
@@ -18,6 +19,18 @@ export const MISSILE = {
   lockRange: 700,
   trailMaxPoints: 24,
   trailSampleInterval: 0.04,    // s between trail samples
+};
+
+// Slower profile used for AI missiles in solo FFA so the player has more
+// time to react. AI in MP doesn't fire missiles at all (handled in engine).
+export const MISSILE_SLOW = {
+  ...MISSILE,
+  initialSpeed: 18,
+  maxSpeed: 65,
+  acceleration: 25,
+  turnRateDegPerSec: 70,
+  ttl: 10.0,
+  damage: 35,
 };
 
 const _v = new THREE.Vector3();
@@ -59,7 +72,7 @@ export function findMissileLock(plane, allPlanes) {
 /* -----------------------------------------------------------------------
  * Spawn
  * --------------------------------------------------------------------- */
-export function fireMissile({ shooter, target, scene }) {
+export function fireMissile({ shooter, target, scene, profile = MISSILE }) {
   const r = shooter.body.rotation();
   const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
   const fwd = _v.set(0, 0, -1).applyQuaternion(q).clone();
@@ -68,7 +81,7 @@ export function fireMissile({ shooter, target, scene }) {
   // Spawn a meter ahead of the nose so the missile doesn't collide with the
   // shooter on frame 1.
   const pos = new THREE.Vector3(t.x, t.y, t.z).addScaledVector(fwd, 6);
-  const vel = fwd.clone().multiplyScalar(MISSILE.initialSpeed);
+  const vel = fwd.clone().multiplyScalar(profile.initialSpeed);
 
   // Inherit shooter velocity so the missile doesn't appear to slow down.
   const sv = shooter.body.linvel();
@@ -97,8 +110,9 @@ export function fireMissile({ shooter, target, scene }) {
     vel,
     target,            // may go null if it dies
     shooter,
-    speed: MISSILE.initialSpeed,
-    ttl: MISSILE.ttl,
+    profile,           // per-missile stats so different shooters can have different speeds
+    speed: profile.initialSpeed,
+    ttl: profile.ttl,
     mesh,
     trail,
     trailPoints: [pos.clone()],
@@ -119,12 +133,11 @@ export function updateMissiles(missiles, allPlanes, scene, dt, onHit = null) {
       continue;
     }
 
+    const prof = m.profile || MISSILE;
     // --- Steering ----------------------------------------------------
     if (m.target && m.target.alive) {
-      // Target may be a plane (.body) or a flare (.pos/.vel).
       const tp = m.target.body ? m.target.body.translation() : m.target.pos;
       const tv = m.target.body ? m.target.body.linvel()      : m.target.vel;
-      // Lead the target a little.
       const lead = 0.25;
       const desiredDir = _v.set(
         tp.x + tv.x * lead - m.pos.x,
@@ -135,14 +148,13 @@ export function updateMissiles(missiles, allPlanes, scene, dt, onHit = null) {
       const curDir = _v2.copy(m.vel).normalize();
       const cosAngle = THREE.MathUtils.clamp(curDir.dot(desiredDir), -1, 1);
       const angle = Math.acos(cosAngle);
-      const maxTurn = THREE.MathUtils.degToRad(MISSILE.turnRateDegPerSec) * dt;
+      const maxTurn = THREE.MathUtils.degToRad(prof.turnRateDegPerSec) * dt;
       const t = angle > 1e-4 ? Math.min(1, maxTurn / angle) : 1;
       curDir.lerp(desiredDir, t).normalize();
 
-      m.speed = Math.min(MISSILE.maxSpeed, m.speed + MISSILE.acceleration * dt);
+      m.speed = Math.min(prof.maxSpeed, m.speed + prof.acceleration * dt);
       m.vel.copy(curDir.multiplyScalar(m.speed));
     } else {
-      // Lost target → fly straight.
       m.target = null;
     }
 
@@ -180,7 +192,7 @@ export function updateMissiles(missiles, allPlanes, scene, dt, onHit = null) {
     if (m.target && !m.target.body) {
       const fp = m.target.pos;
       const dx = fp.x - m.pos.x, dy = fp.y - m.pos.y, dz = fp.z - m.pos.z;
-      if (dx * dx + dy * dy + dz * dz < (MISSILE.hitRadius * 1.5) ** 2) {
+      if (dx * dx + dy * dy + dz * dz < (prof.hitRadius * 1.5) ** 2) {
         spawnExplosion(scene, m.pos.clone(), { count: 14, radius: 5, ttl: 0.6, color: 0xfff0a0 });
         sfxExplosion();
         m.alive = false;
@@ -191,15 +203,15 @@ export function updateMissiles(missiles, allPlanes, scene, dt, onHit = null) {
     // --- Hit test against all planes (skip shooter for first 0.3s) --
     for (const p of allPlanes) {
       if (!p.alive) continue;
-      if (p === m.shooter && (MISSILE.ttl - m.ttl) < 0.3) continue;
+      if (p === m.shooter && (prof.ttl - m.ttl) < 0.3) continue;
       if (p.team === m.shooter.team) continue; // no friendly fire
       const pp = p.body.translation();
       const dx = pp.x - m.pos.x, dy = pp.y - m.pos.y, dz = pp.z - m.pos.z;
       const distSq = dx * dx + dy * dy + dz * dz;
-      const r = MISSILE.hitRadius + Math.max(p.stats.colliderHalf.x, p.stats.colliderHalf.z);
+      const r = prof.hitRadius + Math.max(p.stats.colliderHalf.x, p.stats.colliderHalf.z);
       if (distSq < r * r) {
-        if (onHit) onHit(p, MISSILE.damage, 'missile', m.shooter);
-        else applyDamage(p, MISSILE.damage, m.shooter);
+        if (onHit) onHit(p, prof.damage, 'missile', m.shooter);
+        else applyDamage(p, prof.damage, m.shooter);
         spawnExplosion(scene, m.pos.clone(), { count: 32, radius: 9, ttl: 1.0 });
         sfxExplosion();
         m.alive = false;

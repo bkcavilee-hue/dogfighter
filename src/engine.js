@@ -13,7 +13,7 @@ import { createAircraft, updateAircraft, PLANE_STATS } from './aircraft.js';
 import { createCamera, updateChaseCamera, attachZoom, onResize } from './camera.js';
 import { createWeaponState, updateWeapons, findSoftLock } from './weapons.js';
 import { createAIBrain, updateAI } from './ai.js';
-import { findMissileLock, fireMissile, updateMissiles } from './missiles.js';
+import { findMissileLock, fireMissile, updateMissiles, MISSILE_SLOW } from './missiles.js';
 import { deployFlares, updateFlares, nearestFlare } from './flares.js';
 import {
   checkTerrainCollision, checkAircraftCollisions, tickRespawns, tickExplosions,
@@ -154,10 +154,12 @@ export async function startEngine() {
   player.body.setLinvel({ x: 0, y: 0, z: -player.stats.minSpeed }, true);
   player.name = isMultiplayer ? (network.you?.name || 'You') : 'You';
 
-  // In SOLO mode: spawn AI enemies. In MP mode: rely on remote players.
+  // In SOLO mode: spawn 4 AI enemies in mixed difficulties. In MP: empty.
   const enemies = isMultiplayer ? [] : [
-    createAircraft({ type: 'striker', position: { x:  300, y: 500, z: -550 }, team: 'blue' }),
-    createAircraft({ type: 'bruiser', position: { x: -300, y: 520, z: -650 }, team: 'blue' }),
+    createAircraft({ type: 'interceptor', position: { x:  350, y: 500, z: -500 }, team: 'blue' }),
+    createAircraft({ type: 'striker',     position: { x: -350, y: 520, z: -550 }, team: 'blue' }),
+    createAircraft({ type: 'bruiser',     position: { x:    0, y: 540, z: -700 }, team: 'blue' }),
+    createAircraft({ type: 'striker',     position: { x:  500, y: 510, z: -350 }, team: 'blue' }),
   ];
   for (const e of enemies) {
     scene.add(e.mesh);
@@ -168,20 +170,30 @@ export async function startEngine() {
   /** @type {Map<string, ReturnType<typeof createRemotePlane>>} */
   const remotePlanes = new Map();
 
+  // Host-owned AI bots (MP only). Each has { plane, brain, weapon }.
+  const bots = [];
+
   // allPlanes is rebuilt each tick — see refreshAllPlanes() called below.
   const allPlanes = [player];
   function refreshAllPlanes() {
     allPlanes.length = 0;
     allPlanes.push(player);
-    if (isMultiplayer) for (const r of remotePlanes.values()) allPlanes.push(r);
-    else for (const e of enemies) allPlanes.push(e);
+    if (isMultiplayer) {
+      for (const r of remotePlanes.values()) allPlanes.push(r);
+      for (const b of bots) allPlanes.push(b.plane);
+    } else {
+      for (const e of enemies) allPlanes.push(e);
+    }
   }
   refreshAllPlanes();
 
   const playerWeapon = createWeaponState();
+  // Mixed difficulty roster for solo FFA.
   const aiBrains = isMultiplayer ? [] : [
     createAIBrain('rookie'),
+    createAIBrain('rookie'),
     createAIBrain('veteran'),
+    createAIBrain('ace'),
   ];
   const aiWeapons = enemies.map(() => createWeaponState());
   const missiles = []; // active missiles in flight
@@ -218,9 +230,22 @@ export async function startEngine() {
       scene.remove(proxy.mesh);
       remotePlanes.delete(id);
     });
-    // Apply state snapshots to the matching proxy.
+    // Apply state snapshots to the matching proxy. If we receive state for
+    // an unknown id (e.g. an AI bot owned by the host), lazy-spawn a proxy
+    // using the metadata embedded in the state itself.
     network.on('remoteState', (id, state) => {
-      const proxy = remotePlanes.get(id);
+      let proxy = remotePlanes.get(id);
+      if (!proxy && id !== network.you?.id) {
+        const fakePlayer = {
+          id,
+          name: state.name || (id.startsWith('bot-') ? 'Bot' : 'Pilot'),
+          plane: state.plane || 'striker',
+          team: state.team || 'red',
+        };
+        proxy = createRemotePlane(fakePlayer);
+        remotePlanes.set(id, proxy);
+        scene.add(proxy.mesh);
+      }
       if (proxy) applyRemoteState(proxy, state);
     });
 
@@ -265,6 +290,57 @@ export async function startEngine() {
 
     // Start broadcasting our own state.
     network.startStateLoop(() => buildLocalState(player));
+
+    // ---- Bot fill: host spawns AI bots to fill empty slots. -------
+    // Host = the player with the lexicographically smallest id (stable across
+    // all clients without needing server coordination). When a host leaves,
+    // the next-smallest id becomes host; their bots take over.
+    const allIds = [network.you.id, ...network.players.map((p) => p.id)].sort();
+    const isHost = allIds[0] === network.you.id;
+    if (isHost) {
+      const targetCount = 4;
+      const allPlayersHere = [network.you, ...network.players];
+      const redCount  = allPlayersHere.filter((p) => p.team === 'red').length;
+      const blueCount = allPlayersHere.filter((p) => p.team === 'blue').length;
+      let needRed  = matchModeKey === 'team2v2' ? Math.max(0, 2 - redCount)  : 0;
+      let needBlue = matchModeKey === 'team2v2' ? Math.max(0, 2 - blueCount) : 0;
+      // FFA: just fill to targetCount with unique-team bots.
+      let ffaNeed = matchModeKey === 'team2v2' ? 0 : Math.max(0, targetCount - allPlayersHere.length);
+
+      const PLANE_TYPES = ['interceptor', 'striker', 'bruiser'];
+      const DIFFICULTIES = ['rookie', 'rookie', 'veteran', 'ace'];
+      let botIndex = 0;
+      const spawnBot = (team) => {
+        const id = `bot-${network.you.id}-${botIndex++}`;
+        const planeType = PLANE_TYPES[botIndex % PLANE_TYPES.length];
+        const slots = SPAWNS[team] || SPAWNS.red;
+        const slot = slots[botIndex % slots.length];
+        const bot = createAircraft({ id, type: planeType, position: slot, team, isPlayer: false });
+        bot.name = (team === 'red' ? 'BOT-R' : team === 'blue' ? 'BOT-B' : 'BOT') + botIndex;
+        bot.body.setLinvel({ x: 0, y: 0, z: -bot.stats.maxSpeed }, true);
+        scene.add(bot.mesh);
+        bots.push({
+          plane: bot,
+          brain: createAIBrain(DIFFICULTIES[botIndex % DIFFICULTIES.length]),
+          weapon: createWeaponState(),
+        });
+      };
+      while (needRed-- > 0)  spawnBot('red');
+      while (needBlue-- > 0) spawnBot('blue');
+      while (ffaNeed-- > 0)  spawnBot(`ffa-${botIndex}`); // unique team id per bot
+      console.log(`[MP] host spawned ${bots.length} bot(s)`);
+
+      // Broadcast bot states alongside our own at 20 Hz.
+      const sendBots = () => {
+        if (bots.length === 0) return;
+        const out = [];
+        for (const b of bots) {
+          out.push({ id: b.plane.id, state: { ...buildLocalState(b.plane), name: b.plane.name } });
+        }
+        network.sendBotStates(out);
+      };
+      setInterval(sendBots, 50);
+    }
   }
 
   // --- Match state -----------------------------------------------------
@@ -451,7 +527,26 @@ export async function startEngine() {
         sfxManeuver();
       }
 
-      // --- AI: build intent per enemy and drive it -----------------
+      // --- MP host bots: tick AI + weapons. Bots don't fire missiles. --
+      if (isMultiplayer && bots.length > 0) {
+        for (const b of bots) {
+          const aiIntent = updateAI(b.plane, b.brain, allPlanes, FIXED_DT);
+          aiIntent.missileFire = false;            // no missiles for MP bots
+          updateAircraft(b.plane, aiIntent, FIXED_DT);
+          const targets = allPlanes.filter((p) => p.team !== b.plane.team);
+          updateWeapons(b.plane, b.weapon, aiIntent.fire, targets, scene, FIXED_DT, null,
+            (target, damage, weapon) => {
+              if (target === player) applyDamage(player, damage, b.plane);
+              else applyDamage(target, damage, b.plane);
+              network.sendEvent({ type: 'hit', targetId: target.id, damage, weapon });
+            });
+          // Bot terrain crash + respawn
+          checkTerrainCollision(b.plane, heightmap);
+        }
+        tickRespawns(bots.map((b) => b.plane), FIXED_DT, spawnFor);
+      }
+
+      // --- Solo AI: build intent per enemy and drive it -----------------
       for (let i = 0; i < enemies.length; i++) {
         const e = enemies[i];
         const aiIntent = updateAI(e, aiBrains[i], allPlanes, FIXED_DT);
@@ -459,10 +554,16 @@ export async function startEngine() {
         // AI fires only at non-team planes.
         const targets = allPlanes.filter((p) => p.team !== e.team);
         updateWeapons(e, aiWeapons[i], aiIntent.fire, targets, scene, FIXED_DT);
-        // AI missile launch.
-        if (aiIntent.missileFire && aiIntent.missileTarget && e.missiles > 0) {
+        // AI missile launch (solo only — bots in MP don't fire missiles).
+        // AI missiles use the SLOW profile so the player has time to react.
+        if (!isMultiplayer && aiIntent.missileFire && aiIntent.missileTarget && e.missiles > 0) {
           e.missiles -= 1;
-          missiles.push(fireMissile({ shooter: e, target: aiIntent.missileTarget, scene }));
+          missiles.push(fireMissile({
+            shooter: e,
+            target: aiIntent.missileTarget,
+            scene,
+            profile: MISSILE_SLOW,
+          }));
           if (aiIntent.missileTarget === player) sfxLockWarning();
         }
       }

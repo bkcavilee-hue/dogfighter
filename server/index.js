@@ -90,6 +90,18 @@ io.on('connection', (socket) => {
     socket.to(room.id).emit('game:event', { id: socket.id, event });
   });
 
+  // Bot states: the room "host" pushes states for every AI bot it owns.
+  // Server simply relays each one so other clients can render the bots.
+  socket.on('game:bot-states', (states) => {
+    const room = rooms.getRoomBySocket(socket.id);
+    if (!room || !Array.isArray(states)) return;
+    for (const entry of states) {
+      if (entry?.id && entry?.state) {
+        socket.to(room.id).volatile.emit('game:state', { id: entry.id, state: entry.state });
+      }
+    }
+  });
+
   socket.on('disconnect', () => {
     doLeave();
     console.log(`[-] ${socket.id} disconnected (${io.engine.clientsCount} total)`);
