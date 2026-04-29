@@ -145,8 +145,14 @@ export function createHUD() {
             </div>
             <div id="roomList" style="background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);border-radius:6px;min-height:140px;max-height:200px;overflow:auto;padding:6px;text-align:left;font-size:12px;font-family:monospace;"></div>
           </div>
-          <div id="lobbyStatus" style="flex:1;font-family:monospace;font-size:11px;opacity:0.7;text-align:left;letter-spacing:0.05em;line-height:1.5;padding-top:4px;">
-            CONNECTING...
+          <div style="flex:1;text-align:left;">
+            <div id="lobbyStatus" style="font-family:monospace;font-size:11px;opacity:0.7;letter-spacing:0.05em;line-height:1.5;padding-top:4px;margin-bottom:10px;">
+              CONNECTING...
+            </div>
+            <div id="lobbyRoster" style="display:none;">
+              <div style="font-family:monospace;font-size:10px;opacity:0.5;letter-spacing:0.18em;margin-bottom:6px;">PILOTS IN ROOM</div>
+              <div id="rosterList" style="background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px;font-size:12px;font-family:monospace;min-height:80px;"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -188,6 +194,23 @@ export function createHUD() {
     </style>
   `;
   document.body.appendChild(intro);
+
+  // Countdown overlay (3-2-1 before MP match start)
+  const countdown = document.createElement('div');
+  countdown.id = 'countdown-overlay';
+  countdown.style.cssText = `
+    position: fixed; inset: 0; z-index: 800; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(6,12,22,0.85); backdrop-filter: blur(10px);
+    color: #d8eef8; font-family: 'Inter', system-ui, sans-serif;
+  `;
+  countdown.innerHTML = `
+    <div style="text-align:center;">
+      <div style="font-size:14px;letter-spacing:0.3em;opacity:0.5;margin-bottom:14px;">MATCH STARTING</div>
+      <div id="countdownNum" style="font-size:140px;font-weight:200;color:#4cf;line-height:1;">3</div>
+    </div>
+  `;
+  document.body.appendChild(countdown);
 
   // End-of-match overlay
   const end = document.createElement('div');
@@ -305,7 +328,9 @@ export function showClassSelect(classes, network = null) {
 
   /* ----------------------- lobby setup ------------------------- */
   let lobbyInited = false;
-  let unsubRoomList = null;
+  let unsubs = [];     // network listener cleanup handles
+  let roster = [];     // current room roster (everyone, including you)
+  let isHost = false;
   function initLobby() {
     if (lobbyInited || !network) return;
     lobbyInited = true;
@@ -317,10 +342,16 @@ export function showClassSelect(classes, network = null) {
       status.innerHTML = 'CONNECTED.<br>SELECT A ROOM OR CREATE ONE.';
       network.listRooms().then((rooms) => { roomList = rooms; renderRoomList(); });
     }
-    unsubRoomList = network.on('roomList', (rooms) => {
+    unsubs.push(network.on('roomList', (rooms) => {
       roomList = rooms;
       renderRoomList();
-    });
+    }));
+    unsubs.push(network.on('playerJoined', (p) => {
+      if (joinedRoomId) { roster.push(p); renderRoster(); }
+    }));
+    unsubs.push(network.on('playerLeft', (id) => {
+      if (joinedRoomId) { roster = roster.filter((p) => p.id !== id); renderRoster(); }
+    }));
 
     document.getElementById('createRoomBtn').onclick = async () => {
       const name = document.getElementById('roomName').value.trim() || 'New Room';
@@ -330,11 +361,54 @@ export function showClassSelect(classes, network = null) {
         const res = await network.createRoom({ name, mode: roomMode, playerName, plane: selected });
         joinedRoomId = res.roomId;
         joinedMode = roomMode;
-        status.innerHTML = `IN ROOM <b>${name}</b> (${roomMode === 'ffa' ? 'FREE-FOR-ALL' : '2V2 TEAMS'})<br>WAITING FOR PILOTS...`;
+        roster = [network.you];
+        status.innerHTML = `IN ROOM <b>${name}</b> (${roomMode === 'ffa' ? 'FREE-FOR-ALL' : '2V2 TEAMS'})<br>YOU ARE THE HOST.`;
+        renderRoster();
       } catch (err) {
         status.textContent = 'CREATE FAILED: ' + err.message;
       }
     };
+  }
+
+  function renderRoster() {
+    const panel = document.getElementById('lobbyRoster');
+    const list = document.getElementById('rosterList');
+    if (!panel || !list) return;
+    panel.style.display = roster.length ? 'block' : 'none';
+    // Host = lexicographically smallest id (matches engine.js's bot-host logic).
+    const hostId = roster.length ? [...roster].map((p) => p.id).sort()[0] : null;
+    isHost = hostId === network.you?.id;
+    list.innerHTML = roster.map((p) => {
+      const isYou = p.id === network.you?.id;
+      const teamColor = p.team === 'red' || p.team === 'blue'
+        ? (p.team === 'blue' ? '#4caaff' : '#ff7b6e')
+        : '#aaa';
+      const hostBadge = p.id === hostId
+        ? `<span style="background:#4cf;color:#06121f;padding:1px 6px;border-radius:3px;font-size:9px;letter-spacing:0.15em;margin-left:6px;">HOST</span>`
+        : '';
+      const youBadge = isYou
+        ? `<span style="opacity:0.5;margin-left:6px;font-size:10px;">(you)</span>` : '';
+      return `<div style="display:flex;align-items:center;padding:4px 6px;">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${teamColor};margin-right:8px;"></span>
+        <span>${escapeHtml(p.name || 'Pilot')}</span>${youBadge}${hostBadge}
+        <span style="margin-left:auto;opacity:0.5;font-size:10px;">${escapeHtml(p.plane || '')}</span>
+      </div>`;
+    }).join('');
+    // Update LAUNCH button visibility.
+    const launchBtn = document.getElementById('launchBtn');
+    if (launchBtn) {
+      if (mode === 'mp' && !isHost) {
+        launchBtn.textContent = 'WAITING FOR HOST…';
+        launchBtn.disabled = true;
+        launchBtn.style.opacity = '0.5';
+        launchBtn.style.cursor = 'default';
+      } else {
+        launchBtn.textContent = 'LAUNCH MATCH';
+        launchBtn.disabled = false;
+        launchBtn.style.opacity = '1';
+        launchBtn.style.cursor = 'pointer';
+      }
+    }
   }
 
   function renderRoomList() {
@@ -353,11 +427,13 @@ export function showClassSelect(classes, network = null) {
         if (r.players >= r.maxPlayers) return;
         const playerName = document.getElementById('playerName').value.trim() || 'Pilot';
         try {
-          await network.joinRoom({ roomId: r.id, playerName, plane: selected });
+          const res = await network.joinRoom({ roomId: r.id, playerName, plane: selected });
           joinedRoomId = r.id;
           joinedMode = r.mode || 'ffa';
+          roster = res.players || [network.you];
           document.getElementById('lobbyStatus').innerHTML =
-            `IN ROOM <b>${escapeHtml(r.name)}</b> (${joinedMode === 'ffa' ? 'FFA' : '2V2'})<br>READY TO LAUNCH.`;
+            `IN ROOM <b>${escapeHtml(r.name)}</b> (${joinedMode === 'ffa' ? 'FFA' : '2V2'})<br>WAITING FOR HOST TO LAUNCH.`;
+          renderRoster();
         } catch (err) {
           document.getElementById('lobbyStatus').textContent = 'JOIN FAILED: ' + err.message;
         }
@@ -407,15 +483,60 @@ export function showClassSelect(classes, network = null) {
   overlay.style.display = 'flex';
 
   return new Promise((resolve) => {
+    function finishLaunch() {
+      for (const u of unsubs) try { u(); } catch (_) {}
+      unsubs = [];
+      overlay.style.display = 'none';
+      resolve({ plane: selected, mode, roomId: joinedRoomId, matchMode: joinedMode });
+    }
+
+    function runCountdown(seconds, onDone) {
+      const cd = document.getElementById('countdown-overlay');
+      const num = document.getElementById('countdownNum');
+      if (!cd || !num) { onDone(); return; }
+      cd.style.display = 'flex';
+      let n = seconds;
+      num.textContent = n;
+      const tick = () => {
+        n -= 1;
+        if (n <= 0) {
+          cd.style.display = 'none';
+          onDone();
+        } else {
+          num.textContent = n;
+          setTimeout(tick, 1000);
+        }
+      };
+      setTimeout(tick, 1000);
+    }
+
+    // Anyone in the room (host or not) waits for the match-start event.
+    if (network) {
+      unsubs.push(network.on('remoteEvent', (_id, event) => {
+        if (event?.type === 'match-start' && joinedRoomId) {
+          overlay.style.display = 'none';
+          runCountdown(event.seconds || 3, finishLaunch);
+        }
+      }));
+    }
+
     launch.onclick = () => {
-      if (mode === 'mp' && !joinedRoomId) {
+      if (mode === 'solo') {
+        overlay.style.display = 'none';
+        resolve({ plane: selected, mode, roomId: null, matchMode: 'ffa' });
+        return;
+      }
+      if (!joinedRoomId) {
         document.getElementById('lobbyStatus').innerHTML =
           '<span style="color:#ff8a8a;">JOIN OR CREATE A ROOM FIRST.</span>';
         return;
       }
-      if (unsubRoomList) unsubRoomList();
+      if (!isHost) return; // disabled state already prevents this, but be safe
+      // Broadcast countdown to everyone in the room (including ourselves via
+      // the listener path; the host also runs the countdown locally below).
+      network.sendEvent({ type: 'match-start', seconds: 3 });
       overlay.style.display = 'none';
-      resolve({ plane: selected, mode, roomId: joinedRoomId, matchMode: joinedMode });
+      runCountdown(3, finishLaunch);
     };
   });
 }
@@ -629,13 +750,11 @@ export function updateReticle(camera, player, enemies, softLock, missileLock, lo
     const proj = _project(_noseTmp.set(sp.x, sp.y, sp.z), camera);
     if (proj.visible) {
       const c = THREE.MathUtils.clamp(lockConfidence, 0, 1);
-      // Yellow → orange → red as confidence builds.
       const color = c < 0.5
         ? `rgb(255, ${Math.round(224 - c * 200)}, ${Math.round(102 - c * 200)})`
         : `rgb(255, ${Math.round(124 - (c - 0.5) * 200)}, ${Math.round(0)})`;
       const size = 22 + c * 6;
       drawBracket(_rctx, proj.x, proj.y, size, color);
-      // Confidence ring around the bracket.
       _rctx.strokeStyle = color;
       _rctx.lineWidth = 2;
       _rctx.beginPath();
@@ -647,6 +766,22 @@ export function updateReticle(camera, player, enemies, softLock, missileLock, lo
         _rctx.textAlign = 'center';
         _rctx.fillText('LOCKED', proj.x, proj.y - size - 12);
       }
+
+      // Lead reticle — small yellow diamond at the target's predicted future
+      // position. Helps the player aim manually and shows missile lead.
+      const sv = softLock.body.linvel();
+      const pp = player.body.translation();
+      const dx = sp.x - pp.x, dy = sp.y - pp.y, dz = sp.z - pp.z;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const APPARENT_BULLET_SPEED = 500; // m/s — visual lead time only
+      const leadTime = THREE.MathUtils.clamp(dist / APPARENT_BULLET_SPEED, 0.05, 1.0);
+      const leadPos = _noseTmp.set(
+        sp.x + sv.x * leadTime,
+        sp.y + sv.y * leadTime,
+        sp.z + sv.z * leadTime,
+      );
+      const leadProj = _project(leadPos, camera);
+      if (leadProj.visible) drawLeadMarker(_rctx, leadProj.x, leadProj.y, color);
     }
   }
 
@@ -771,6 +906,23 @@ function drawBracket(ctx, x, y, size, color) {
   ctx.moveTo(x - s, y + s - c); ctx.lineTo(x - s, y + s); ctx.lineTo(x - s + c, y + s);
   ctx.moveTo(x + s - c, y + s); ctx.lineTo(x + s, y + s); ctx.lineTo(x + s, y + s - c);
   ctx.stroke();
+}
+
+/** Small diamond marker indicating the lead point ahead of a moving target. */
+function drawLeadMarker(ctx, x, y, color) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y - 5);
+  ctx.lineTo(x + 5, y);
+  ctx.lineTo(x, y + 5);
+  ctx.lineTo(x - 5, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawLockBracket(ctx, x, y, size, color) {

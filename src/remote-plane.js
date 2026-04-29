@@ -71,6 +71,7 @@ export function applyRemoteState(remote, state) {
   remote.score = state.score ?? remote.score;
   remote._heading = state.heading ?? remote._heading;
   remote._pitch = state.pitch ?? remote._pitch;
+  if (state.name && state.name !== remote.name) remote.name = state.name;
 }
 
 /** Tick the proxy — interpolate the mesh + fake body to the target state. */
@@ -127,6 +128,7 @@ export function buildLocalState(plane) {
     score: plane.score,
     team: plane.team,
     plane: plane.type,
+    name: plane.name,
   };
 }
 

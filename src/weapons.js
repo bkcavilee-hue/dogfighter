@@ -101,7 +101,10 @@ export function updateWeapons(plane, weapon, fire, otherPlanes, scene, dt, softL
     const interval = 1 / GUN.fireRatePerSec;
     while (weapon.fireAccumulator >= interval) {
       weapon.fireAccumulator -= interval;
-      fireShot(plane, weapon, otherPlanes, scene, softLock, onHit);
+      // softLock is only set for the player; treat that as the marker for
+      // "player shot" → use the bigger hit volume. AI keeps the tight one.
+      const hitRadiusBoost = softLock !== null ? 2.0 : 0.4;
+      fireShot(plane, weapon, otherPlanes, scene, softLock, onHit, hitRadiusBoost);
 
       plane.heat += GUN.heatPerShot;
       if (plane.heat >= GUN.overheatThreshold) {
@@ -129,7 +132,7 @@ export function updateWeapons(plane, weapon, fire, otherPlanes, scene, dt, softL
   }
 }
 
-function fireShot(plane, weapon, otherPlanes, scene, softLock, onHit) {
+function fireShot(plane, weapon, otherPlanes, scene, softLock, onHit, hitRadiusBoost = 0.4) {
   const t = plane.body.translation();
   const r = plane.body.rotation();
   _origin.set(t.x, t.y, t.z);
@@ -174,7 +177,7 @@ function fireShot(plane, weapon, otherPlanes, scene, softLock, onHit) {
     const along = toTarget.dot(_dir);
     if (along < 0 || along > hitDist) continue;
     const perpSq = toTarget.lengthSq() - along * along;
-    const radius = Math.max(target.stats.colliderHalf.x, target.stats.colliderHalf.z) + 0.4;
+    const radius = Math.max(target.stats.colliderHalf.x, target.stats.colliderHalf.z) + hitRadiusBoost;
     if (perpSq <= radius * radius) {
       hitTarget = target;
       hitDist = along;
