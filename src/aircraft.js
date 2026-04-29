@@ -279,22 +279,17 @@ export function updateAircraft(plane, intent, dt) {
   if (plane._pitchSmoothed === undefined) plane._pitchSmoothed = 0;
   plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, 6.0 * dt);
 
-  const rollAxisTarget = THREE.MathUtils.clamp(intent.roll || 0, -1, 1);
-  if (plane._rollSmoothed === undefined) plane._rollSmoothed = 0;
-  plane._rollSmoothed += (rollAxisTarget - plane._rollSmoothed) * Math.min(1, 6.0 * dt);
-
   const yawDelta   = plane._yawSmoothed   * THREE.MathUtils.degToRad(s.turnRateDegPerSec)  * dt;
   const pitchDelta = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
-  const rollDelta  = plane._rollSmoothed  * THREE.MathUtils.degToRad(s.rollRateDegPerSec ?? 220) * dt;
 
-  // Apply pitch, yaw, and roll in the plane's LOCAL frame. q.multiply(dq)
-  // means "rotate by dq in q's local axes" — the right behavior for any
-  // orientation including fully inverted flight.
+  // Apply pitch then yaw in the plane's LOCAL frame. q.multiply(dq) means
+  // "rotate by dq in q's local axes" — works at any orientation including
+  // inverted flight (which you reach by holding the pitch input long enough
+  // to loop over the top).
   const dqPitch = _qa.setFromAxisAngle(_axisX, pitchDelta);
   const dqYaw   = _qb.setFromAxisAngle(_axisY, yawDelta);
-  const dqRoll  = _qc.setFromAxisAngle(_axisZ, rollDelta);
-  q.multiply(dqPitch).multiply(dqYaw).multiply(dqRoll);
-  q.normalize(); // guard against drift
+  q.multiply(dqPitch).multiply(dqYaw);
+  q.normalize();
 
   body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
 

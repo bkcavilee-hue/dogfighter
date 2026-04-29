@@ -415,7 +415,6 @@ export async function startEngine() {
       const playerIntent = {
         yaw:   (input.left ? 1 : 0) - (input.right ? 1 : 0),
         pitch: (input.climb ? 1 : 0) - (input.dive ? 1 : 0),
-        roll:  (input.rollL ? 1 : 0) - (input.rollR ? 1 : 0),
         boost: input.boost,
         fire:  input.fire,
         loopTap:      consumeLoopTap(),
