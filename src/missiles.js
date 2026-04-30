@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { applyDamage } from './gamestate.js';
 import { spawnExplosion } from './fx.js';
 import { sfxMissileLaunch, sfxExplosion } from './audio.js';
+import { getMissileMesh } from './models.js';
 
 // Default missile profile. Used by the player and (unless overridden) by AI.
 export const MISSILE = {
@@ -87,11 +88,15 @@ export function fireMissile({ shooter, target, scene, profile = MISSILE }) {
   const sv = shooter.body.linvel();
   vel.add(new THREE.Vector3(sv.x, sv.y, sv.z).multiplyScalar(0.7));
 
-  // Visual: small cylinder
-  const geom = new THREE.CylinderGeometry(0.18, 0.18, 1.4, 8);
-  geom.rotateX(Math.PI / 2);
-  const mat = new THREE.MeshStandardMaterial({ color: 0xddd7c0, metalness: 0.4, roughness: 0.6 });
-  const mesh = new THREE.Mesh(geom, mat);
+  // Visual: prefer the loaded missile GLB; fall back to a cylinder if it
+  // failed to preload.
+  let mesh = getMissileMesh();
+  if (!mesh) {
+    const geom = new THREE.CylinderGeometry(0.18, 0.18, 1.4, 8);
+    geom.rotateX(Math.PI / 2);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xddd7c0, metalness: 0.4, roughness: 0.6 });
+    mesh = new THREE.Mesh(geom, mat);
+  }
   mesh.position.copy(pos);
   scene.add(mesh);
 

@@ -24,7 +24,10 @@ import {
   onRestartClick, hideLoading, showClassSelect,
 } from './ui.js';
 import { createMatchState, startMatch, tickMatch } from './match.js';
-import { preloadPlaneModels, preloadArenaModels, getArenaModel, bakeIslandHeightmap } from './models.js';
+import {
+  preloadPlaneModels, preloadArenaModels, preloadMissileModel,
+  getArenaModel, bakeIslandHeightmap,
+} from './models.js';
 import { tickFX, tickContrail } from './fx.js';
 import {
   initAudio, unlockAudio, sfxFlare, sfxManeuver, sfxLockWarning,
@@ -95,6 +98,7 @@ export async function startEngine() {
   const modelLoadPromise = Promise.all([
     preloadPlaneModels(),
     preloadArenaModels(),
+    preloadMissileModel(),
   ]);
 
   // --- Class select + lobby -------------------------------------------
