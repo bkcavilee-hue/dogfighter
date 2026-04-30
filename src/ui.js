@@ -656,9 +656,12 @@ export function updateMinimap(player, others) {
     if (!p.alive) continue;
     const t = p.body.translation();
     const { px, py } = project(t.x, t.z);
-    const isFriendly = player && p.team === player.team;
-    const color = isFriendly ? '#4caaff' : '#ff7b6e';
-    drawHeadingTriangle(_ctx, px, py, headingOf(p), 4.5, color);
+    let color;
+    if (p.team === 'ufo' || p.isUfo) color = '#44ff77';            // UFO = green
+    else if (player && p.team === player.team) color = '#4caaff';  // friendly
+    else color = '#ff7b6e';                                         // enemy
+    const size = (p.team === 'ufo' || p.isUfo) ? 7 : 4.5;
+    drawHeadingTriangle(_ctx, px, py, headingOf(p), size, color);
 
     // Distance label (3D distance, formatted compactly). Number naturally
     // gets smaller as the target approaches.
@@ -866,8 +869,10 @@ function drawOffScreenIndicators(ctx, camera, enemies, w, h) {
     const ex = cx + Math.cos(canvasAngle) * radius;
     const ey = cy + Math.sin(canvasAngle) * radius;
 
-    drawScreenEdgeArrow(ctx, ex, ey, canvasAngle,
-      e.team === 'blue' ? '#4caaff' : '#ff7b6e');
+    const color = (e.team === 'ufo' || e.isUfo) ? '#44ff77'
+                : e.team === 'blue'              ? '#4caaff'
+                                                 : '#ff7b6e';
+    drawScreenEdgeArrow(ctx, ex, ey, canvasAngle, color);
   }
 }
 

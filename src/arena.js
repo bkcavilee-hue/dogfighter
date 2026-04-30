@@ -6,12 +6,12 @@ import { createNoise2D } from 'simplex-noise';
 import { RAPIER, createRigidBody, createCollider } from './physics.js';
 
 export const ARENA = {
-  width: 2500,
-  depth: 2500,
-  segments: 96,         // collision heightmap resolution (lower = faster bake)
-  maxHeight: 280,       // peak terrain altitude in meters
+  width: 7500,           // 3× larger desert (matches ARENA_FIT.island in models.js)
+  depth: 7500,
+  segments: 96,          // collision heightmap resolution (lower = faster bake)
+  maxHeight: 280,        // peak terrain altitude in meters
   seaLevel: 0,
-  maxAltitude: 1350,    // playable ceiling — above this is "out of bounds"
+  maxAltitude: 600,      // lower playable ceiling — fights stay near the deck
 };
 
 /* -----------------------------------------------------------------------

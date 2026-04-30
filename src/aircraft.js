@@ -252,12 +252,12 @@ export function updateAircraft(plane, intent, dt) {
     m.visualAngle = (1 - m.timer / m.duration) * Math.PI * 2;
 
     const fwd = _v3.set(0, 0, -1).applyQuaternion(q);
-    let vx = fwd.x * speed, vy = fwd.y * speed, vz = fwd.z * speed;
+    let vx = fwd.x * speed, vz = fwd.z * speed;
+    let vy = (plane._pitchSmoothed || 0) * (s.pitchRateDegPerSec * 0.35);
     if (m.dodgeSpeed) {
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
       const push = m.dodgeSpeed * m.dodgeDir;
       vx += right.x * push;
-      vy += right.y * push;
       vz += right.z * push;
     }
     body.setLinvel({ x: vx, y: vy, z: vz }, true);
@@ -281,29 +281,28 @@ export function updateAircraft(plane, intent, dt) {
   if (plane._pitchSmoothed === undefined) plane._pitchSmoothed = 0;
   plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, 6.0 * dt);
 
-  const yawDelta   = plane._yawSmoothed   * THREE.MathUtils.degToRad(s.turnRateDegPerSec)  * dt;
-  let pitchDelta   = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
+  const yawDelta = plane._yawSmoothed * THREE.MathUtils.degToRad(s.turnRateDegPerSec) * dt;
 
-  // Clamp the pitch to ±80° so the camera, AI, and minimap stay in their
-  // sane Euler-friendly ranges. We measure current pitch from the forward
-  // vector's Y component (asin(fwd.y)) and never let the delta push past
-  // the limit.
-  const fwdNow = _v3.set(0, 0, -1).applyQuaternion(q);
-  const currentPitch = Math.asin(THREE.MathUtils.clamp(fwdNow.y, -1, 1));
-  const PITCH_LIMIT = THREE.MathUtils.degToRad(80);
-  const newPitch = THREE.MathUtils.clamp(currentPitch + pitchDelta, -PITCH_LIMIT, PITCH_LIMIT);
-  pitchDelta = newPitch - currentPitch;
-
-  // Apply pitch then yaw in the plane's LOCAL frame.
-  const dqPitch = _qa.setFromAxisAngle(_axisX, pitchDelta);
-  const dqYaw   = _qb.setFromAxisAngle(_axisY, yawDelta);
-  q.multiply(dqPitch).multiply(dqYaw);
+  // AUTO-FLATTEN MODEL: the plane is always horizontal. Yaw rotates the
+  // heading; W/S translates directly into vertical velocity. There's no
+  // pitch axis on the body at all, so the camera stays steady, weapons
+  // always fire level, and AI doesn't fight a tilted forward vector.
+  // Apply ONLY yaw to the body.
+  const dqYaw = _qb.setFromAxisAngle(_axisY, yawDelta);
+  q.multiply(dqYaw);
   q.normalize();
 
   body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
 
   const forward = _v3.set(0, 0, -1).applyQuaternion(q);
-  body.setLinvel({ x: forward.x * speed, y: forward.y * speed, z: forward.z * speed }, true);
+  // Vertical velocity from pitch input. Reuse the rated pitch speed (deg/sec)
+  // as a m/sec scalar so faster planes also climb faster.
+  const verticalSpeed = plane._pitchSmoothed * (s.pitchRateDegPerSec * 0.35);
+  body.setLinvel({
+    x: forward.x * speed,
+    y: verticalSpeed,
+    z: forward.z * speed,
+  }, true);
   body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
   plane.speed = speed;

@@ -27,6 +27,11 @@ const MISSILE_PATH = '/assets/models/missile.glb';
 const MISSILE_TARGET_LENGTH = 1.4;
 let _missilePrototype = null;
 
+// UFO boss mesh — large, single prototype.
+const UFO_PATH = '/assets/models/ufo.glb';
+const UFO_TARGET_LENGTH = 14;
+let _ufoPrototype = null;
+
 // Per-model orientation correction. Start with 180° flip (assuming the
 // GLBs face +Z by default). If still wrong, try ±Math.PI/2 for sideways.
 const ORIENTATION = {
@@ -48,8 +53,8 @@ const ARENA_FIT = {
   // length = horizontal extent (X/Z) in meters. Use the widest horizontal
   // axis so vertical features (mountains, dunes) don't dominate the scale.
   // lift  = vertical offset after centering.
-  island: { length: 2400, lift: 0 },     // desert — fills most of the play area
-  ocean:  { length: 5500, lift: -1.0 },  // larger than the desert so it always rims it
+  island: { length: 7200, lift: 0 },      // desert at 3× scale
+  ocean:  { length: 9000, lift: -1.0 },   // larger than the desert so it always rims it
 };
 
 export async function preloadPlaneModels() {
@@ -132,6 +137,35 @@ export async function preloadMissileModel() {
 export function getMissileMesh() {
   if (!_missilePrototype) return null;
   return _missilePrototype.clone(true);
+}
+
+/* -----------------------------------------------------------------------
+ * UFO boss mesh
+ * --------------------------------------------------------------------- */
+export async function preloadUfoModel() {
+  try {
+    const gltf = await loader.loadAsync(UFO_PATH);
+    const root = gltf.scene;
+    const box = new THREE.Box3().setFromObject(root);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const widest = Math.max(size.x, size.z) || 1;
+    root.scale.setScalar(UFO_TARGET_LENGTH / widest);
+    const newBox = new THREE.Box3().setFromObject(root);
+    const center = new THREE.Vector3();
+    newBox.getCenter(center);
+    root.position.sub(center);
+    const wrapper = new THREE.Group();
+    wrapper.add(root);
+    _ufoPrototype = wrapper;
+  } catch (err) {
+    console.warn('[models] UFO load failed:', err);
+  }
+}
+
+export function getUfoMesh() {
+  if (!_ufoPrototype) return null;
+  return _ufoPrototype.clone(true);
 }
 
 /* -----------------------------------------------------------------------

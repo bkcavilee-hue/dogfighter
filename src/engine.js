@@ -25,9 +25,10 @@ import {
 } from './ui.js';
 import { createMatchState, startMatch, tickMatch } from './match.js';
 import {
-  preloadPlaneModels, preloadArenaModels, preloadMissileModel,
-  getArenaModel, bakeIslandHeightmap,
+  preloadPlaneModels, preloadArenaModels, preloadMissileModel, preloadUfoModel,
+  getArenaModel, bakeIslandHeightmap, getUfoMesh,
 } from './models.js';
+import { createUfoBoss, updateUfoBoss } from './ufo.js';
 import { tickFX, tickContrail } from './fx.js';
 import {
   initAudio, unlockAudio, sfxFlare, sfxManeuver, sfxLockWarning,
@@ -38,20 +39,21 @@ import { createRemotePlane, applyRemoteState, tickRemotePlane, buildLocalState }
 const FIXED_DT = 1 / 60;
 const _maneuverQ = new THREE.Quaternion();
 
-// Spawn slot table (shared across solo + MP). Sized for the 2500m arena
-// so planes spawn well within the playable area but not on top of each other.
+// Spawn slot table (shared across solo + MP). Sized for the 7500m arena
+// at the new low-altitude band (~250m) — the 600m ceiling means combat
+// happens near the deck.
 const SPAWNS = {
   red:  [
-    { x:    0, y: 500, z:  650 },
-    { x:  400, y: 520, z:  500 },
-    { x: -400, y: 520, z:  500 },
-    { x:    0, y: 540, z:  900 },
+    { x:    0, y: 250, z:  1500 },
+    { x:  900, y: 270, z:  1200 },
+    { x: -900, y: 270, z:  1200 },
+    { x:    0, y: 290, z:  2000 },
   ],
   blue: [
-    { x:    0, y: 500, z: -650 },
-    { x:  400, y: 520, z: -500 },
-    { x: -400, y: 520, z: -500 },
-    { x:    0, y: 540, z: -900 },
+    { x:    0, y: 250, z: -1500 },
+    { x:  900, y: 270, z: -1200 },
+    { x: -900, y: 270, z: -1200 },
+    { x:    0, y: 290, z: -2000 },
   ],
 };
 
@@ -99,6 +101,7 @@ export async function startEngine() {
     preloadPlaneModels(),
     preloadArenaModels(),
     preloadMissileModel(),
+    preloadUfoModel(),
   ]);
 
   // --- Class select + lobby -------------------------------------------
@@ -154,7 +157,7 @@ export async function startEngine() {
   const playerTeam = isMultiplayer ? (network.you?.team || 'red') : 'red';
   const player = createAircraft({
     type: playerClass,
-    position: { x: 0, y: 500, z: 650 },
+    position: { x: 0, y: 250, z: 1500 },
     team: playerTeam,
     isPlayer: true,
   });
@@ -164,10 +167,10 @@ export async function startEngine() {
 
   // In SOLO mode: spawn 4 AI enemies in mixed difficulties. In MP: empty.
   const enemies = isMultiplayer ? [] : [
-    createAircraft({ type: 'interceptor', position: { x:  350, y: 500, z: -500 }, team: 'blue' }),
-    createAircraft({ type: 'striker',     position: { x: -350, y: 520, z: -550 }, team: 'blue' }),
-    createAircraft({ type: 'bruiser',     position: { x:    0, y: 540, z: -700 }, team: 'blue' }),
-    createAircraft({ type: 'striker',     position: { x:  500, y: 510, z: -350 }, team: 'blue' }),
+    createAircraft({ type: 'interceptor', position: { x:  800, y: 250, z: -1200 }, team: 'blue' }),
+    createAircraft({ type: 'striker',     position: { x: -800, y: 270, z: -1300 }, team: 'blue' }),
+    createAircraft({ type: 'bruiser',     position: { x:    0, y: 290, z: -1700 }, team: 'blue' }),
+    createAircraft({ type: 'striker',     position: { x: 1100, y: 260, z: -900  }, team: 'blue' }),
   ];
   for (const e of enemies) {
     scene.add(e.mesh);
@@ -181,6 +184,17 @@ export async function startEngine() {
   // Host-owned AI bots (MP only). Each has { plane, brain, weapon }.
   const bots = [];
 
+  // UFO boss enemy — solo only. Spawns at the center of the arena, fires
+  // a 3-direction green laser triangle at the closest player.
+  let ufoBoss = null;
+  if (!isMultiplayer) {
+    ufoBoss = createUfoBoss({
+      scene,
+      position: new THREE.Vector3(0, 350, 0),
+      getMeshFn: getUfoMesh,
+    });
+  }
+
   // allPlanes is rebuilt each tick — see refreshAllPlanes() called below.
   const allPlanes = [player];
   function refreshAllPlanes() {
@@ -191,6 +205,7 @@ export async function startEngine() {
       for (const b of bots) allPlanes.push(b.plane);
     } else {
       for (const e of enemies) allPlanes.push(e);
+      if (ufoBoss && ufoBoss.alive) allPlanes.push(ufoBoss);
     }
   }
   refreshAllPlanes();
@@ -591,6 +606,9 @@ export async function startEngine() {
       missiles.length = 0;
       for (const m of ours)   if (m.alive) missiles.push(m);
       for (const m of ghosts) if (m.alive) missiles.push(m);
+
+      // UFO boss tick (solo only).
+      if (ufoBoss) updateUfoBoss(ufoBoss, allPlanes, scene, FIXED_DT);
 
       updateFlares(flares, scene, FIXED_DT);
 

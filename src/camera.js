@@ -18,11 +18,11 @@ export function createCamera() {
 }
 
 export const cameraConfig = {
-  height: 7,           // meters above plane (near cockpit-level for FP feel)
-  back: 32,            // meters behind plane (further back so you see more in front)
+  height: 5,           // meters above plane (very close — plane is always level)
+  back: 22,            // meters behind plane (closer zoom)
   followLerp: 0.10,
   lookLerp: 0.18,
-  lookAheadMeters: 80, // aim further down the nose
+  lookAheadMeters: 90, // aim further down the nose
 };
 
 let _smoothedLookAt = new THREE.Vector3();
