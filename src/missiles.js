@@ -88,15 +88,32 @@ export function fireMissile({ shooter, target, scene, profile = MISSILE }) {
   const sv = shooter.body.linvel();
   vel.add(new THREE.Vector3(sv.x, sv.y, sv.z).multiplyScalar(0.7));
 
-  // Visual: prefer the loaded missile GLB; fall back to a cylinder if it
-  // failed to preload.
+  // Visual: prefer the loaded missile GLB; fall back to a cylinder.
+  // Apply a hot emissive glow so the missile pops against the terrain.
   let mesh = getMissileMesh();
   if (!mesh) {
     const geom = new THREE.CylinderGeometry(0.18, 0.18, 1.4, 8);
     geom.rotateX(Math.PI / 2);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xddd7c0, metalness: 0.4, roughness: 0.6 });
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xfff0c4, emissive: 0xff7733, emissiveIntensity: 1.4,
+      metalness: 0.4, roughness: 0.5,
+    });
     mesh = new THREE.Mesh(geom, mat);
+  } else {
+    mesh.traverse((o) => {
+      if (o.isMesh && o.material) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) {
+          if ('emissive' in m) m.emissive = new THREE.Color(0xff7733);
+          if ('emissiveIntensity' in m) m.emissiveIntensity = 1.6;
+        }
+      }
+    });
   }
+  // A small point light tracking the missile makes it visible at night
+  // and adds a sense of motion against the terrain.
+  const halo = new THREE.PointLight(0xff8844, 1.2, 25, 1.6);
+  mesh.add(halo);
   mesh.position.copy(pos);
   scene.add(mesh);
 

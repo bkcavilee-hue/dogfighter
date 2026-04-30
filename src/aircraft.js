@@ -14,9 +14,9 @@ export const PLANE_STATS = {
     maxBoost: 140,
     boostDrainPerSec: 50,
     boostRegenPerSec: 38,
-    minSpeed: 32,
-    maxSpeed: 50,
-    boostSpeed: 88,
+    minSpeed: 50,
+    maxSpeed: 75,
+    boostSpeed: 130,
     turnRateDegPerSec: 160,
     pitchRateDegPerSec: 130,
     rollRateDegPerSec: 240,
@@ -30,9 +30,9 @@ export const PLANE_STATS = {
     maxBoost: 130,
     boostDrainPerSec: 46,
     boostRegenPerSec: 42,
-    minSpeed: 28,
-    maxSpeed: 42,
-    boostSpeed: 76,
+    minSpeed: 42,
+    maxSpeed: 62,
+    boostSpeed: 112,
     turnRateDegPerSec: 130,
     pitchRateDegPerSec: 110,
     rollRateDegPerSec: 200,
@@ -46,9 +46,9 @@ export const PLANE_STATS = {
     maxBoost: 120,
     boostDrainPerSec: 40,
     boostRegenPerSec: 46,
-    minSpeed: 22,
-    maxSpeed: 35,
-    boostSpeed: 60,
+    minSpeed: 32,
+    maxSpeed: 50,
+    boostSpeed: 95,
     turnRateDegPerSec: 95,
     pitchRateDegPerSec: 85,
     rollRateDegPerSec: 150,
@@ -94,6 +94,31 @@ function buildPlaceholderMesh(color) {
   return group;
 }
 
+/** Two stacked emissive cones to look like a hot afterburner plume. */
+function buildAfterburner() {
+  const group = new THREE.Group();
+  const outer = new THREE.Mesh(
+    new THREE.ConeGeometry(0.55, 3.0, 12, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xff7833, transparent: true, opacity: 0.65,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }),
+  );
+  outer.rotation.x = Math.PI / 2; // tip points backward (+Z)
+  const inner = new THREE.Mesh(
+    new THREE.ConeGeometry(0.28, 2.0, 10, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xfff2a8, transparent: true, opacity: 0.85,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }),
+  );
+  inner.rotation.x = Math.PI / 2;
+  inner.position.z = 0.4;
+  group.add(outer, inner);
+  group.userData.isAfterburner = true;
+  return group;
+}
+
 /** Slap a small colored disc under the plane so team is readable at a glance. */
 function addTeamMarker(mesh, team) {
   const color = team === 'blue' ? 0x4caaff : 0xff7b6e;
@@ -120,9 +145,13 @@ export function createAircraft({
   const stats = PLANE_STATS[type];
   // Prefer real GLB; fall back to placeholder if it didn't preload.
   const mesh = getPlaneMesh(type) || buildPlaceholderMesh(team === 'blue' ? 0x4caaff : stats.color);
-  // Add a subtle team marker so red and blue are distinguishable when GLBs
-  // are used (since real models share the same texture).
   addTeamMarker(mesh, team);
+  // Afterburner cone — additive emissive geometry behind the tail. Scales
+  // and fades with boost intensity each frame.
+  const burner = buildAfterburner();
+  burner.position.set(0, 0, 1.6); // behind the plane (forward = -Z)
+  burner.scale.setScalar(0.001);  // hidden by default
+  mesh.add(burner);
 
   const body = createRigidBody(position, null, 'dynamic');
   body.setLinearDamping(0.6);
@@ -186,26 +215,31 @@ const _qc    = new THREE.Quaternion();
  *   }
  */
 // Maneuvers are visual on the MESH (`visualAxis`/`visualAngle`) and never
-// change the body's rotation — the camera stays steady because the underlying
-// flight orientation isn't disturbed. Dodges add a lateral velocity push.
+// change the body's rotation. Dodges add a lateral velocity push that
+// PERSISTS after the visual roll ends — the plane stays out left/right
+// instead of recentering. Double-tapping the opposite direction during an
+// active roll switches direction and chains a fresh dodge.
 const MANEUVERS = {
   // Forward alley-oop: mesh does a 360° pitch while plane keeps cruising.
   loop:  {
     visualAxis: new THREE.Vector3(1, 0, 0),
     duration: 0.85, invuln: 0.4, cd: 4.0,
     dodgeSpeed: 0, dodgeDir: 0,
+    persistVel: 0,
   },
-  // Roll-left dodge: mesh rolls left, plane shoves leftward.
+  // Roll-left dodge: mesh rolls left, plane shoves leftward, lateral
+  // velocity persists for ~1.5s so the plane stays out to the left.
   rollL: {
     visualAxis: new THREE.Vector3(0, 0, 1),
-    duration: 0.45, invuln: 0.35, cd: 2.5,
-    dodgeSpeed: 45, dodgeDir: -1,
+    duration: 0.75, invuln: 0.45, cd: 1.8,
+    dodgeSpeed: 70, dodgeDir: -1,
+    persistVel: 1.5,
   },
-  // Roll-right dodge: mirror of rollL.
   rollR: {
     visualAxis: new THREE.Vector3(0, 0, -1),
-    duration: 0.45, invuln: 0.35, cd: 2.5,
-    dodgeSpeed: 45, dodgeDir: 1,
+    duration: 0.75, invuln: 0.45, cd: 1.8,
+    dodgeSpeed: 70, dodgeDir: 1,
+    persistVel: 1.5,
   },
 };
 
@@ -234,17 +268,31 @@ export function updateAircraft(plane, intent, dt) {
   const q = _q.set(r.x, r.y, r.z, r.w);
 
   // --- Trigger a new maneuver -----------------------------------------
-  if (!plane._maneuver && plane._maneuverCD <= 0) {
-    let preset = null;
-    if (intent.loopTap)        preset = MANEUVERS.loop;
-    else if (intent.rollLeftTap)  preset = MANEUVERS.rollL;
-    else if (intent.rollRightTap) preset = MANEUVERS.rollR;
-    if (preset) {
-      plane._maneuver = { ...preset, timer: preset.duration, visualAngle: 0 };
-      plane.invincibleTimer = preset.invuln;
-      plane._maneuverCD = preset.cd;
-    }
+  // Loops / rolls. Special case: if a roll is currently active, an opposite
+  // double-tap *switches* direction immediately (chain dodges).
+  let triggerPreset = null;
+  if (intent.loopTap)        triggerPreset = MANEUVERS.loop;
+  else if (intent.rollLeftTap)  triggerPreset = MANEUVERS.rollL;
+  else if (intent.rollRightTap) triggerPreset = MANEUVERS.rollR;
+
+  const inRoll = plane._maneuver && (plane._maneuver === MANEUVERS.rollL ||
+                                     plane._maneuver === MANEUVERS.rollR ||
+                                     plane._maneuver?.dodgeSpeed); // shaped like a roll
+  const switchingDirection = inRoll && triggerPreset && triggerPreset.dodgeSpeed &&
+    triggerPreset.dodgeDir !== plane._maneuver.dodgeDir;
+
+  if (triggerPreset && (!plane._maneuver || switchingDirection) && plane._maneuverCD <= 0) {
+    plane._maneuver = { ...triggerPreset, timer: triggerPreset.duration, visualAngle: 0 };
+    plane.invincibleTimer = triggerPreset.invuln;
+    plane._maneuverCD = triggerPreset.cd;
+  } else if (triggerPreset && switchingDirection) {
+    // Cooldown allows mid-roll switch even before _maneuverCD elapses.
+    plane._maneuver = { ...triggerPreset, timer: triggerPreset.duration, visualAngle: 0 };
+    plane.invincibleTimer = triggerPreset.invuln;
   }
+
+  // Persistent lateral velocity timer after a roll completes.
+  if (plane._lateralRemain > 0) plane._lateralRemain -= dt;
 
   // --- Execute maneuver (mesh-only rotation; body keeps cruising) ----
   if (plane._maneuver) {
@@ -264,7 +312,16 @@ export function updateAircraft(plane, intent, dt) {
     body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
     m.timer -= dt;
-    if (m.timer <= 0) plane._maneuver = null;
+    if (m.timer <= 0) {
+      // Bake in persistent lateral velocity so the plane stays "out" to
+      // the side instead of snapping back to centered flight.
+      if (m.persistVel > 0 && m.dodgeSpeed) {
+        plane._lateralRemain = m.persistVel;
+        plane._lateralDir = m.dodgeDir;
+        plane._lateralStartSpeed = m.dodgeSpeed * 0.5; // half the in-roll push
+      }
+      plane._maneuver = null;
+    }
     plane.speed = speed;
     return;
   }
@@ -295,13 +352,23 @@ export function updateAircraft(plane, intent, dt) {
   body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
 
   const forward = _v3.set(0, 0, -1).applyQuaternion(q);
-  // Vertical velocity from pitch input. Reuse the rated pitch speed (deg/sec)
-  // as a m/sec scalar so faster planes also climb faster.
   const verticalSpeed = plane._pitchSmoothed * (s.pitchRateDegPerSec * 0.35);
+  let vx = forward.x * speed;
+  let vz = forward.z * speed;
+  // Persistent lateral velocity from a recent dodge — fades over its life.
+  if (plane._lateralRemain > 0 && plane._lateralStartSpeed) {
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+    // Linear fade: full at start, zero at end of the persist window.
+    const startWindow = 1.5; // matches MANEUVERS.persistVel
+    const t = Math.max(0, Math.min(1, plane._lateralRemain / startWindow));
+    const push = plane._lateralStartSpeed * plane._lateralDir * t;
+    vx += right.x * push;
+    vz += right.z * push;
+  }
   body.setLinvel({
-    x: forward.x * speed,
+    x: vx,
     y: verticalSpeed,
-    z: forward.z * speed,
+    z: vz,
   }, true);
   body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 

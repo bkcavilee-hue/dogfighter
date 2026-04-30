@@ -32,6 +32,11 @@ const UFO_PATH = '/assets/models/ufo.glb';
 const UFO_TARGET_LENGTH = 14;
 let _ufoPrototype = null;
 
+// UFO2 drone mesh — smaller saucer.
+const UFO2_PATH = '/assets/models/ufo2.glb';
+const UFO2_TARGET_LENGTH = 5.5;
+let _ufo2Prototype = null;
+
 // Per-model orientation correction. Start with 180° flip (assuming the
 // GLBs face +Z by default). If still wrong, try ±Math.PI/2 for sideways.
 const ORIENTATION = {
@@ -44,18 +49,42 @@ const cache = new Map();
 const arenaCache = new Map();
 const loader = new GLTFLoader();
 
-// Arena GLBs (visual only — collision is procedural).
-const ARENA_PATHS = {
-  island: '/assets/maps/island.glb',
-  ocean:  '/assets/maps/ocean.glb',
+// Map registry. Each entry has its own ground GLB, optional ocean GLB, and
+// horizontal-fit length so they all align to ARENA dimensions. The active
+// map id is set by the lobby and consumed by the engine on load.
+export const MAPS = {
+  desert: {
+    label: 'Desert',
+    paths: {
+      island: '/assets/maps/island.glb',
+      ocean:  '/assets/maps/ocean.glb', // kept loadable but engine omits it
+    },
+    fit: {
+      island: { length: 2800, lift: 0 },
+      ocean:  { length: 4000, lift: -1.0 },
+    },
+    hasOcean: false,                    // desert: ocean stripped
+    hasUfoBoss: true,
+    hasUfoDrones: true,
+  },
+  mountains: {
+    label: 'Mountains',
+    paths: {
+      island: '/assets/maps/mountains.glb',
+    },
+    fit: {
+      island: { length: 2800, lift: 0 },
+    },
+    hasOcean: false,
+    hasUfoBoss: false,
+    hasUfoDrones: false,
+  },
 };
-const ARENA_FIT = {
-  // length = horizontal extent (X/Z) in meters. Use the widest horizontal
-  // axis so vertical features (mountains, dunes) don't dominate the scale.
-  // lift  = vertical offset after centering.
-  island: { length: 7200, lift: 0 },      // desert at 3× scale
-  ocean:  { length: 9000, lift: -1.0 },   // larger than the desert so it always rims it
-};
+let activeMapId = 'desert';
+export function setActiveMap(id) {
+  if (MAPS[id]) activeMapId = id;
+}
+export function getActiveMap() { return MAPS[activeMapId]; }
 
 export async function preloadPlaneModels() {
   await Promise.all(Object.entries(MODEL_PATHS).map(async ([key, path]) => {
@@ -168,15 +197,45 @@ export function getUfoMesh() {
   return _ufoPrototype.clone(true);
 }
 
+/* UFO2 drone mesh */
+export async function preloadUfo2Model() {
+  try {
+    const gltf = await loader.loadAsync(UFO2_PATH);
+    const root = gltf.scene;
+    const box = new THREE.Box3().setFromObject(root);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const widest = Math.max(size.x, size.z) || 1;
+    root.scale.setScalar(UFO2_TARGET_LENGTH / widest);
+    const newBox = new THREE.Box3().setFromObject(root);
+    const center = new THREE.Vector3();
+    newBox.getCenter(center);
+    root.position.sub(center);
+    const wrapper = new THREE.Group();
+    wrapper.add(root);
+    _ufo2Prototype = wrapper;
+  } catch (err) {
+    console.warn('[models] UFO2 load failed:', err);
+  }
+}
+
+export function getUfo2Mesh() {
+  if (!_ufo2Prototype) return null;
+  return _ufo2Prototype.clone(true);
+}
+
 /* -----------------------------------------------------------------------
- * Arena GLBs (island, ocean) — single instance, no cloning.
+ * Arena GLBs (island, ocean) — loaded based on the active map.
  * --------------------------------------------------------------------- */
 export async function preloadArenaModels() {
-  await Promise.all(Object.entries(ARENA_PATHS).map(async ([key, path]) => {
+  const map = MAPS[activeMapId];
+  arenaCache.clear();
+  const entries = Object.entries(map.paths);
+  await Promise.all(entries.map(async ([key, path]) => {
     try {
       const gltf = await loader.loadAsync(path);
       const root = gltf.scene;
-      const cfg = ARENA_FIT[key];
+      const cfg = map.fit[key];
       // Scale by HORIZONTAL extent (X/Z) so the height isn't accidentally
       // dominant — otherwise a tall mountain peak makes the whole island
       // shrink horizontally to fit.

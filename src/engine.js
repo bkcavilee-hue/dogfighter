@@ -26,9 +26,11 @@ import {
 import { createMatchState, startMatch, tickMatch } from './match.js';
 import {
   preloadPlaneModels, preloadArenaModels, preloadMissileModel, preloadUfoModel,
-  getArenaModel, bakeIslandHeightmap, getUfoMesh,
+  preloadUfo2Model, getArenaModel, bakeIslandHeightmap, getUfoMesh, getUfo2Mesh,
+  setActiveMap, getActiveMap,
 } from './models.js';
 import { createUfoBoss, updateUfoBoss } from './ufo.js';
+import { createDrones, updateDrones, updateMines } from './drones.js';
 import { tickFX, tickContrail } from './fx.js';
 import {
   initAudio, unlockAudio, sfxFlare, sfxManeuver, sfxLockWarning,
@@ -38,22 +40,22 @@ import { createRemotePlane, applyRemoteState, tickRemotePlane, buildLocalState }
 
 const FIXED_DT = 1 / 60;
 const _maneuverQ = new THREE.Quaternion();
+const _axisZ = new THREE.Vector3(0, 0, 1);
 
-// Spawn slot table (shared across solo + MP). Sized for the 7500m arena
-// at the new low-altitude band (~250m) — the 600m ceiling means combat
-// happens near the deck.
+// Spawn slot table for the 3000m arena. Mid-altitude (~400m), inside the
+// 1200m ceiling, well within the X/Z bounds.
 const SPAWNS = {
   red:  [
-    { x:    0, y: 250, z:  1500 },
-    { x:  900, y: 270, z:  1200 },
-    { x: -900, y: 270, z:  1200 },
-    { x:    0, y: 290, z:  2000 },
+    { x:    0, y: 400, z:  800 },
+    { x:  500, y: 420, z:  600 },
+    { x: -500, y: 420, z:  600 },
+    { x:    0, y: 450, z: 1100 },
   ],
   blue: [
-    { x:    0, y: 250, z: -1500 },
-    { x:  900, y: 270, z: -1200 },
-    { x: -900, y: 270, z: -1200 },
-    { x:    0, y: 290, z: -2000 },
+    { x:    0, y: 400, z: -800 },
+    { x:  500, y: 420, z: -600 },
+    { x: -500, y: 420, z: -600 },
+    { x:    0, y: 450, z: -1100 },
   ],
 };
 
@@ -96,12 +98,12 @@ export async function startEngine() {
   createHUD();
   hideLoading();
 
-  // Kick off model preload in parallel with class select.
-  const modelLoadPromise = Promise.all([
+  // Plane / missile / UFO models load now (independent of map choice).
+  const commonLoadPromise = Promise.all([
     preloadPlaneModels(),
-    preloadArenaModels(),
     preloadMissileModel(),
     preloadUfoModel(),
+    preloadUfo2Model(),
   ]);
 
   // --- Class select + lobby -------------------------------------------
@@ -124,14 +126,13 @@ export async function startEngine() {
   ], network);
   const playerClass = lobbyResult.plane;
   const isMultiplayer = lobbyResult.mode === 'mp';
-  // Match mode is fixed for the whole match — pin it now so the MP host
-  // bot-fill block (which references it ~150 lines below) doesn't TDZ on
-  // a still-uninitialized const.
   const matchModeKey = isMultiplayer ? (lobbyResult.matchMode || 'ffa') : 'ffa';
+  // Apply selected map BEFORE the arena preload so models.js loads the right GLBs.
+  setActiveMap(lobbyResult.map || 'desert');
+  const mapCfg = getActiveMap();
 
-  // Wait for models to be ready before spawning planes.
-  await modelLoadPromise;
-  // Class-select click counts as user interaction — unlock audio.
+  // Now that we know the map, start the arena preload + finish the common preload.
+  await Promise.all([commonLoadPromise, preloadArenaModels()]);
   unlockAudio();
 
   // Swap procedural arena visuals for the GLBs.
@@ -147,17 +148,19 @@ export async function startEngine() {
       heightmap.data.set(baked.data);
     }
   }
-  const oceanModel = getArenaModel('ocean');
-  if (oceanModel) {
-    ocean.mesh.visible = false;
-    scene.add(oceanModel);
+  // Ocean is now per-map (desert + mountains both omit it). Hide procedural
+  // shader plane regardless; only add the GLB ocean if the map declares it.
+  ocean.mesh.visible = false;
+  if (mapCfg.hasOcean) {
+    const oceanModel = getArenaModel('ocean');
+    if (oceanModel) scene.add(oceanModel);
   }
 
   // --- Aircraft --------------------------------------------------------
   const playerTeam = isMultiplayer ? (network.you?.team || 'red') : 'red';
   const player = createAircraft({
     type: playerClass,
-    position: { x: 0, y: 250, z: 1500 },
+    position: { x: 0, y: 400, z: 800 },
     team: playerTeam,
     isPlayer: true,
   });
@@ -167,10 +170,10 @@ export async function startEngine() {
 
   // In SOLO mode: spawn 4 AI enemies in mixed difficulties. In MP: empty.
   const enemies = isMultiplayer ? [] : [
-    createAircraft({ type: 'interceptor', position: { x:  800, y: 250, z: -1200 }, team: 'blue' }),
-    createAircraft({ type: 'striker',     position: { x: -800, y: 270, z: -1300 }, team: 'blue' }),
-    createAircraft({ type: 'bruiser',     position: { x:    0, y: 290, z: -1700 }, team: 'blue' }),
-    createAircraft({ type: 'striker',     position: { x: 1100, y: 260, z: -900  }, team: 'blue' }),
+    createAircraft({ type: 'interceptor', position: { x:  500, y: 400, z: -700 }, team: 'blue' }),
+    createAircraft({ type: 'striker',     position: { x: -500, y: 420, z: -750 }, team: 'blue' }),
+    createAircraft({ type: 'bruiser',     position: { x:    0, y: 450, z: -950 }, team: 'blue' }),
+    createAircraft({ type: 'striker',     position: { x:  650, y: 410, z: -550 }, team: 'blue' }),
   ];
   for (const e of enemies) {
     scene.add(e.mesh);
@@ -184,15 +187,21 @@ export async function startEngine() {
   // Host-owned AI bots (MP only). Each has { plane, brain, weapon }.
   const bots = [];
 
-  // UFO boss enemy — solo only. Spawns at the center of the arena, fires
-  // a 3-direction green laser triangle at the closest player.
+  // UFO boss enemy — solo only AND only on maps where the boss belongs.
   let ufoBoss = null;
-  if (!isMultiplayer) {
+  if (!isMultiplayer && mapCfg.hasUfoBoss) {
     ufoBoss = createUfoBoss({
       scene,
-      position: new THREE.Vector3(0, 350, 0),
+      position: new THREE.Vector3(0, 500, 0),
       getMeshFn: getUfoMesh,
     });
+  }
+
+  // UFO2 drones — three orbiting around the boss area on the desert map.
+  let drones = [];
+  let mines = [];
+  if (!isMultiplayer && mapCfg.hasUfoDrones) {
+    drones = createDrones({ scene, getMeshFn: getUfo2Mesh });
   }
 
   // allPlanes is rebuilt each tick — see refreshAllPlanes() called below.
@@ -206,6 +215,8 @@ export async function startEngine() {
     } else {
       for (const e of enemies) allPlanes.push(e);
       if (ufoBoss && ufoBoss.alive) allPlanes.push(ufoBoss);
+      for (const d of drones) if (d.alive) allPlanes.push(d);
+      for (const m of mines)  if (m.alive) allPlanes.push(m);
     }
   }
   refreshAllPlanes();
@@ -433,8 +444,8 @@ export async function startEngine() {
       // Gameplay frozen unless match is actively playing.
       if (match.state !== 'playing') continue;
 
-      // Keep allPlanes in sync with remote-plane joins/leaves.
-      if (isMultiplayer) refreshAllPlanes();
+      // Keep allPlanes in sync — solo needs it too (drones/mines die / spawn).
+      refreshAllPlanes();
 
       // --- Player intent (keyboard → flight model) -----------------
       const playerIntent = {
@@ -607,8 +618,10 @@ export async function startEngine() {
       for (const m of ours)   if (m.alive) missiles.push(m);
       for (const m of ghosts) if (m.alive) missiles.push(m);
 
-      // UFO boss tick (solo only).
+      // UFO boss + drones + mines (solo only).
       if (ufoBoss) updateUfoBoss(ufoBoss, allPlanes, scene, FIXED_DT);
+      if (drones.length) updateDrones(drones, mines, allPlanes, scene, FIXED_DT);
+      if (mines.length)  updateMines(mines, allPlanes, scene, FIXED_DT);
 
       updateFlares(flares, scene, FIXED_DT);
 
@@ -629,10 +642,20 @@ export async function startEngine() {
     }
 
     // Sync render meshes to physics bodies. Apply maneuver visual offset
-    // to the mesh AFTER syncing — this rotates the mesh without disturbing
-    // the underlying physics body, so the camera stays steady.
+    // AND a banking tilt while turning (mesh-only — body stays auto-flat).
     for (const p of allPlanes) {
       syncMesh(p.mesh, p.body);
+      // Banking: lerp _bankRoll toward (yawSmoothed × MAX_BANK). Releasing
+      // input lets it level out toward 0.
+      if (p._yawSmoothed !== undefined) {
+        const targetBank = -p._yawSmoothed * (Math.PI / 6); // ±30° max
+        p._bankRoll = (p._bankRoll || 0);
+        p._bankRoll += (targetBank - p._bankRoll) * Math.min(1, 4.0 * dt);
+        if (Math.abs(p._bankRoll) > 0.001) {
+          _maneuverQ.setFromAxisAngle(_axisZ, p._bankRoll);
+          p.mesh.quaternion.multiply(_maneuverQ);
+        }
+      }
       if (p._maneuver) {
         _maneuverQ.setFromAxisAngle(p._maneuver.visualAxis, p._maneuver.visualAngle);
         p.mesh.quaternion.multiply(_maneuverQ);
@@ -641,6 +664,18 @@ export async function startEngine() {
         p.mesh.visible = (Math.floor(p.invincibleTimer * 8) % 2) === 0;
       } else if (p.alive) {
         p.mesh.visible = true;
+      }
+      // Afterburner scale: boostActive → big plume, otherwise nothing.
+      if (p.mesh) {
+        const burner = p.mesh.children.find((c) => c.userData?.isAfterburner);
+        if (burner) {
+          const target = p.boostActive ? 1.0 : 0.001;
+          const scale = (burner._scaleSmooth || 0.001);
+          const next = scale + (target - scale) * Math.min(1, 12 * dt);
+          burner._scaleSmooth = next;
+          burner.scale.setScalar(next);
+          burner.visible = next > 0.05;
+        }
       }
     }
 
@@ -658,7 +693,19 @@ export async function startEngine() {
     // Minimap: show every plane in the world (AI enemies in solo, remote
     // players in MP). Color is decided per-plane by team relationship.
     updateMinimap(player, allPlanes.filter((p) => p !== player));
-    updateReticle(camera, player, enemies, playerSoftLock, playerMissileLock, playerWeapon.lockConfidence);
+    // Incoming missiles for HUD warning: any live missile whose target is us,
+    // or who's getting close to us regardless of original target.
+    const incoming = missiles.filter((m) => m.alive && (
+      m.target === player ||
+      (m.pos.distanceTo
+        ? m.pos.distanceTo(new THREE.Vector3(
+            player.body.translation().x,
+            player.body.translation().y,
+            player.body.translation().z,
+          )) < 250
+        : false)
+    ));
+    updateReticle(camera, player, enemies, playerSoftLock, playerMissileLock, playerWeapon.lockConfidence, incoming);
     updateMatchHUD(match);
 
     renderer.render(scene, camera);

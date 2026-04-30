@@ -174,6 +174,13 @@ export function createHUD() {
         </div>
       </div>
 
+      <div style="margin-bottom:14px;display:flex;gap:8px;justify-content:center;align-items:center;font-family:monospace;font-size:11px;letter-spacing:0.18em;opacity:0.7;">
+        MAP:
+        <select id="mapSelect" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#d8eef8;padding:6px 10px;border-radius:6px;font-family:inherit;font-size:11px;letter-spacing:0.1em;cursor:pointer;">
+          <option value="desert">DESERT</option>
+          <option value="mountains">MOUNTAINS</option>
+        </select>
+      </div>
       <div id="classGrid" style="display:flex;gap:14px;justify-content:center;margin-bottom:24px;"></div>
       <button id="launchBtn" style="
         background:#4cf;color:#06121f;border:0;padding:14px 40px;
@@ -501,7 +508,9 @@ export function showClassSelect(classes, network = null) {
       for (const u of unsubs) try { u(); } catch (_) {}
       unsubs = [];
       overlay.style.display = 'none';
-      resolve({ plane: selected, mode, roomId: joinedRoomId, matchMode: joinedMode });
+      const mapSel = document.getElementById('mapSelect');
+      const map = mapSel ? mapSel.value : 'desert';
+      resolve({ plane: selected, mode, roomId: joinedRoomId, matchMode: joinedMode, map });
     }
 
     function runCountdown(seconds, onDone) {
@@ -537,7 +546,9 @@ export function showClassSelect(classes, network = null) {
     launch.onclick = () => {
       if (mode === 'solo') {
         overlay.style.display = 'none';
-        resolve({ plane: selected, mode, roomId: null, matchMode: 'ffa' });
+        const mapSel = document.getElementById('mapSelect');
+        const map = mapSel ? mapSel.value : 'desert';
+        resolve({ plane: selected, mode, roomId: null, matchMode: 'ffa', map });
         return;
       }
       if (!joinedRoomId) {
@@ -746,7 +757,7 @@ const _fwdTmp = new THREE.Vector3();
  * @param {Object|null} missileLock  - missile lock target (red bracket)
  * @param {number}      lockConfidence - 0..1 from weapon state
  */
-export function updateReticle(camera, player, enemies, softLock, missileLock, lockConfidence = 0) {
+export function updateReticle(camera, player, enemies, softLock, missileLock, lockConfidence = 0, incomingMissiles = []) {
   if (!_rctx) return;
   _rctx.clearRect(0, 0, _reticle.width, _reticle.height);
   if (!player || !player.alive) return;
@@ -821,6 +832,10 @@ export function updateReticle(camera, player, enemies, softLock, missileLock, lo
   // 3.5) Off-screen enemy indicators (arrows at screen edge).
   drawOffScreenIndicators(_rctx, camera, enemies, _reticle.width, _reticle.height);
 
+  // 3.7) Incoming-missile warnings — pulsing red arrows at screen edge for
+  //      every missile currently homing on the player.
+  drawIncomingMissiles(_rctx, camera, incomingMissiles, player, _reticle.width, _reticle.height);
+
   // 4) Missile lock bracket (red, with corners).
   if (missileLock && missileLock.alive) {
     const mp = missileLock.body.translation();
@@ -873,6 +888,59 @@ function drawOffScreenIndicators(ctx, camera, enemies, w, h) {
                 : e.team === 'blue'              ? '#4caaff'
                                                  : '#ff7b6e';
     drawScreenEdgeArrow(ctx, ex, ey, canvasAngle, color);
+  }
+}
+
+/** Pulsing red arrows + distance labels for missiles homing on the player. */
+const _missVec = new THREE.Vector3();
+function drawIncomingMissiles(ctx, camera, missiles, player, w, h) {
+  if (!missiles || missiles.length === 0) return;
+  const cx = w / 2, cy = h / 2;
+  const margin = 90;
+  const radius = Math.min(w, h) / 2 - margin;
+  const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.012);
+  for (const m of missiles) {
+    if (!m.alive) continue;
+    if (player) {
+      const pp = player.body.translation();
+      const dx = m.pos.x - pp.x, dy = m.pos.y - pp.y, dz = m.pos.z - pp.z;
+      const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+      _missVec.set(m.pos.x, m.pos.y, m.pos.z);
+      const proj = _project(_missVec, camera);
+      const behind = proj && (m.pos.clone ? false : false); // proj already returns visible
+      let nx = proj.visible ? (proj.x - cx) : 0;
+      let ny = proj.visible ? (proj.y - cy) : 0;
+      // If projection failed/behind, fall back to direction in world space.
+      if (!proj.visible || (Math.abs(nx) < 1 && Math.abs(ny) < 1)) {
+        const r = camera.matrixWorldInverse.elements;
+        // Transform missile position to camera space → use sign for direction.
+        // Simpler: use horizontal direction relative to camera.
+        const rel = _missVec.clone().sub(camera.position);
+        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+        const dotFwd = rel.dot(fwd);
+        const dotRight = rel.dot(right);
+        const dotUp = rel.dot(up);
+        nx = dotRight;
+        ny = -dotUp; // canvas Y inverted
+        // If behind (dotFwd < 0), invert direction so arrow points behind.
+        if (dotFwd < 0) { nx = -nx; ny = -ny; }
+      }
+      const angle = Math.atan2(ny, nx);
+      const ex = cx + Math.cos(angle) * radius;
+      const ey = cy + Math.sin(angle) * radius;
+      const color = `rgba(255, ${Math.round(40 + 60 * (1 - pulse))}, 40, ${0.7 + 0.3 * pulse})`;
+      drawScreenEdgeArrow(ctx, ex, ey, angle, color);
+      // Distance label
+      ctx.font = 'bold 10px monospace';
+      ctx.fillStyle = '#ff5555';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(0,0,0,0.85)';
+      ctx.shadowBlur = 2;
+      ctx.fillText(`MISSILE ${Math.round(dist)}m`, ex, ey + 24);
+      ctx.shadowBlur = 0;
+    }
   }
 }
 

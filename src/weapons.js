@@ -15,19 +15,19 @@ const GUN = {
   damage: 5,
   range: 600,
   spreadDeg: 0.6,
-  aimAssistMaxAngleDeg: 26,    // beyond this angle, no assist (was 18°)
-  aimAssistBase: 0.75,         // strength when you just started firing (was 0.55)
-  aimAssistMax:  0.99,         // strength at full lock-on confidence
-  lockRampSeconds: 0.3,        // faster lock build-up (was 0.4)
-  lockDecayPerSec: 0.7,        // slower decay = stickier lock (was 1.0)
+  aimAssistMaxAngleDeg: 18,    // tighter — must aim closer to target
+  aimAssistBase: 0.55,         // less generous out of the gate
+  aimAssistMax:  0.95,
+  lockRampSeconds: 0.4,
+  lockDecayPerSec: 0.9,
 };
 
 const _origin = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
-/** Find the gun-aim-assist soft-lock target (forward cone + max range). */
-const SOFT_LOCK = { coneDeg: 35, range: 600 }; // wider/longer than before for easier aim
+/** Soft-lock cone — tightened for closer-range, more skillful dogfights. */
+const SOFT_LOCK = { coneDeg: 22, range: 400 };
 const _v3 = new THREE.Vector3();
 export function findSoftLock(plane, allPlanes) {
   const r = plane.body.rotation();
@@ -101,9 +101,9 @@ export function updateWeapons(plane, weapon, fire, otherPlanes, scene, dt, softL
     const interval = 1 / GUN.fireRatePerSec;
     while (weapon.fireAccumulator >= interval) {
       weapon.fireAccumulator -= interval;
-      // softLock is only set for the player; treat that as the marker for
-      // "player shot" → use the bigger hit volume. AI keeps the tight one.
-      const hitRadiusBoost = softLock !== null ? 2.0 : 0.4;
+      // softLock is only set for the player. Tighter player hit-boost
+      // (1.2 vs the old 2.0) keeps things more skill-based.
+      const hitRadiusBoost = softLock !== null ? 1.2 : 0.4;
       fireShot(plane, weapon, otherPlanes, scene, softLock, onHit, hitRadiusBoost);
 
       plane.heat += GUN.heatPerShot;
