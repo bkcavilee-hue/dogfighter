@@ -178,7 +178,7 @@ export function createHUD() {
         MAP:
         <select id="mapSelect" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#d8eef8;padding:6px 10px;border-radius:6px;font-family:inherit;font-size:11px;letter-spacing:0.1em;cursor:pointer;">
           <option value="desert">DESERT</option>
-          <option value="mountains">MOUNTAINS</option>
+          <option value="mountains" disabled>MOUNTAINS (decimate first)</option>
         </select>
       </div>
       <div id="classGrid" style="display:flex;gap:14px;justify-content:center;margin-bottom:24px;"></div>

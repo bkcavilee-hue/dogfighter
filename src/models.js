@@ -67,8 +67,13 @@ export const MAPS = {
     hasUfoBoss: true,
     hasUfoDrones: true,
   },
+  // Mountains map is staged but disabled until the GLB is decimated below
+  // 100 MB (currently 199 MB → first-load is too heavy for the client and
+  // Railway can't serve LFS pointers as binary. Re-enable by setting
+  // disabled: false after compressing the asset.).
   mountains: {
-    label: 'Mountains',
+    label: 'Mountains (soon)',
+    disabled: true,
     paths: {
       island: '/assets/maps/mountains.glb',
     },
