@@ -27,8 +27,8 @@ export function createHUD() {
     <div class="bar-bg"><div id="boostBar" class="bar-fill boost-fill" style="width:100%"></div></div>
     <div class="stat"><span>OVERHEAT</span><span><b id="heatVal">0</b>%</span></div>
     <div class="bar-bg"><div id="heatBar" class="bar-fill heat-fill" style="width:0%"></div></div>
-    <div class="stat"><span>MISSILES</span><span><b id="missileVal">2</b>/<b id="missileMax">2</b></span></div>
-    <div class="missile-icons" id="missileIcons"></div>
+    <div class="stat"><span>MISSILE</span><span id="missileLabel">READY</span></div>
+    <div class="bar-bg"><div id="missileBar" class="bar-fill" style="width:100%;background:linear-gradient(90deg,#ff8866,#ffaa44);"></div></div>
     <div class="stat" style="margin-top:6px;"><span>FLARES</span><span><b id="flareVal">5</b>/<b id="flareMax">5</b></span></div>
     <div class="missile-icons" id="flareIcons"></div>
     <div class="stat" style="margin-top:8px;"><span>SPEED</span><span><b id="speedVal">0</b> m/s</span></div>
@@ -573,26 +573,23 @@ export function updateHUD(plane) {
   document.getElementById('boostBar').style.width = boostPct + '%';
   document.getElementById('heatVal').textContent = Math.round(heatPct);
   document.getElementById('heatBar').style.width = heatPct + '%';
-  document.getElementById('missileVal').textContent = plane.missiles;
-  document.getElementById('missileMax').textContent = plane.maxMissiles;
   document.getElementById('flareVal').textContent = plane.flares;
   document.getElementById('flareMax').textContent = plane.maxFlares;
   document.getElementById('speedVal').textContent = Math.round(plane.speed);
   document.getElementById('scoreVal').textContent = plane.score;
 
-  // Missile dots
-  const icons = document.getElementById('missileIcons');
-  if (icons.childElementCount !== plane.maxMissiles) {
-    icons.innerHTML = '';
-    for (let i = 0; i < plane.maxMissiles; i++) {
-      const d = document.createElement('div');
-      d.className = 'missile';
-      d.textContent = '●';
-      icons.appendChild(d);
-    }
-  }
-  for (let i = 0; i < icons.childElementCount; i++) {
-    icons.children[i].classList.toggle('ready', i < plane.missiles);
+  // Missile reload bar — fills from 0 → 100% over plane.missileReloadSec.
+  const reloadFrac = plane.missileReloadSec > 0
+    ? 1 - Math.min(1, plane.missileCD / plane.missileReloadSec)
+    : 1;
+  const missileBar = document.getElementById('missileBar');
+  const missileLabel = document.getElementById('missileLabel');
+  if (missileBar) missileBar.style.width = (reloadFrac * 100) + '%';
+  if (missileLabel) {
+    missileLabel.textContent = plane.missileCD > 0
+      ? Math.ceil(plane.missileCD) + 's'
+      : 'READY';
+    missileLabel.style.color = plane.missileCD > 0 ? '#888' : '#a8ffb8';
   }
 
   // Flare dots

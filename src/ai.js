@@ -15,36 +15,36 @@ import { ARENA } from './arena.js';
 export const DIFFICULTY = {
   rookie: {
     label: 'Rookie',
-    fireRange: 160, fireConeDeg: 9,
+    fireRange: 140, fireConeDeg: 14,        // wider cone = misses more
     detectionRange: 1100, boostRange: 500,
     evadeOnDamageProb: 0.55, evadeMin: 2.2, evadeMax: 3.6,
     lowHP: 0.35,
-    missileFireCD: 9,        // s between missile launches
-    missileLockDelay: 1.4,   // s of holding lock before firing
-    yawAimGain: 1.1,         // less aggressive aim correction
-    pitchAimGain: 1.6,
+    missileFireCD: 12,                       // longer missile cooldown
+    missileLockDelay: 1.8,
+    yawAimGain: 1.0,
+    pitchAimGain: 1.4,
   },
   veteran: {
     label: 'Veteran',
-    fireRange: 200, fireConeDeg: 5,
-    detectionRange: 1500, boostRange: 450,
+    fireRange: 180, fireConeDeg: 9,
+    detectionRange: 1400, boostRange: 450,
     evadeOnDamageProb: 0.7, evadeMin: 1.8, evadeMax: 3.0,
     lowHP: 0.30,
-    missileFireCD: 6,
-    missileLockDelay: 0.7,
-    yawAimGain: 1.6,
-    pitchAimGain: 2.2,
+    missileFireCD: 9,
+    missileLockDelay: 1.0,
+    yawAimGain: 1.4,
+    pitchAimGain: 1.8,
   },
   ace: {
     label: 'Ace',
-    fireRange: 240, fireConeDeg: 3,
-    detectionRange: 1800, boostRange: 400,
+    fireRange: 220, fireConeDeg: 6,
+    detectionRange: 1700, boostRange: 400,
     evadeOnDamageProb: 0.85, evadeMin: 1.5, evadeMax: 2.4,
     lowHP: 0.25,
-    missileFireCD: 4,
-    missileLockDelay: 0.4,
-    yawAimGain: 2.0,
-    pitchAimGain: 2.6,
+    missileFireCD: 7,
+    missileLockDelay: 0.7,
+    yawAimGain: 1.7,
+    pitchAimGain: 2.2,
   },
 };
 

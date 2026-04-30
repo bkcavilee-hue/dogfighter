@@ -10,7 +10,7 @@ const _q = new THREE.Quaternion();
 
 export function createCamera() {
   const cam = new THREE.PerspectiveCamera(
-    60, window.innerWidth / window.innerHeight, 1, 12000
+    72, window.innerWidth / window.innerHeight, 1, 12000
   );
   cam.position.set(0, 120, 80);
   cam.lookAt(0, 0, 0);
@@ -18,11 +18,11 @@ export function createCamera() {
 }
 
 export const cameraConfig = {
-  height: 16,        // meters above plane
-  back: 24,          // meters behind plane (along -forward)
-  followLerp: 0.10,  // position smoothing
-  lookLerp: 0.18,    // look-at smoothing
-  lookAheadMeters: 45, // how far in front of the plane the camera aims
+  height: 7,           // meters above plane (near cockpit-level for FP feel)
+  back: 32,            // meters behind plane (further back so you see more in front)
+  followLerp: 0.10,
+  lookLerp: 0.18,
+  lookAheadMeters: 80, // aim further down the nose
 };
 
 let _smoothedLookAt = new THREE.Vector3();
@@ -65,8 +65,8 @@ export function updateChaseCamera(camera, plane) {
 export function attachZoom(camera) {
   window.addEventListener('wheel', (e) => {
     const delta = Math.sign(e.deltaY);
-    cameraConfig.height = THREE.MathUtils.clamp(cameraConfig.height + delta * 3, 8, 80);
-    cameraConfig.back   = THREE.MathUtils.clamp(cameraConfig.back   + delta * 4, 14, 110);
+    cameraConfig.height = THREE.MathUtils.clamp(cameraConfig.height + delta * 3, 4, 60);
+    cameraConfig.back   = THREE.MathUtils.clamp(cameraConfig.back   + delta * 4, 20, 110);
   }, { passive: true });
 }
 

@@ -42,17 +42,16 @@ function tap(maneuver) {
 
 function keyDown(code) {
   switch (code) {
-    // Inverted pitch: W / ArrowUp pushes the nose DOWN (dive); S / ArrowDown
-    // pulls UP (climb). Matches classic flight-sim sticks.
+    // Standard arcade pitch: W / ArrowUp climbs, S / ArrowDown dives.
     case 'KeyW':
     case 'ArrowUp':
-      if (!input.dive) tap('loop');   // double-tap W still triggers loop
-      input.dive = true;
+      if (!input.climb) tap('loop');   // double-tap W still triggers loop
+      input.climb = true;
       break;
     case 'KeyS':
     case 'ArrowDown':
-      if (!input.climb) tap('flare'); // double-tap S still triggers flares
-      input.climb = true;
+      if (!input.dive) tap('flare');   // double-tap S still triggers flares
+      input.dive = true;
       break;
     case 'KeyA':
     case 'ArrowLeft':
@@ -76,9 +75,9 @@ function keyDown(code) {
 function keyUp(code) {
   switch (code) {
     case 'KeyW':
-    case 'ArrowUp':    input.dive = false; break;
+    case 'ArrowUp':    input.climb = false; break;
     case 'KeyS':
-    case 'ArrowDown':  input.climb = false; break;
+    case 'ArrowDown':  input.dive = false; break;
     case 'KeyA':
     case 'ArrowLeft':  input.left = false; break;
     case 'KeyD':

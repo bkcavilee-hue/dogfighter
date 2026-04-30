@@ -116,7 +116,7 @@ export function respawnPlane(plane, spawnPos) {
   plane.HP = plane.maxHP;
   plane.boost = plane.maxBoost;
   plane.heat = 0;
-  plane.missiles = plane.maxMissiles;
+  plane.missileCD = 0;       // missile is ready immediately on respawn
   plane.respawnTimer = 0;
   plane.invincibleTimer = 2.0;
   plane.alive = true;

@@ -14,9 +14,9 @@ export const PLANE_STATS = {
     maxBoost: 140,
     boostDrainPerSec: 50,
     boostRegenPerSec: 38,
-    minSpeed: 45,
-    maxSpeed: 70,
-    boostSpeed: 125,
+    minSpeed: 32,
+    maxSpeed: 50,
+    boostSpeed: 88,
     turnRateDegPerSec: 160,
     pitchRateDegPerSec: 130,
     rollRateDegPerSec: 240,
@@ -30,9 +30,9 @@ export const PLANE_STATS = {
     maxBoost: 130,
     boostDrainPerSec: 46,
     boostRegenPerSec: 42,
-    minSpeed: 38,
-    maxSpeed: 60,
-    boostSpeed: 110,
+    minSpeed: 28,
+    maxSpeed: 42,
+    boostSpeed: 76,
     turnRateDegPerSec: 130,
     pitchRateDegPerSec: 110,
     rollRateDegPerSec: 200,
@@ -46,9 +46,9 @@ export const PLANE_STATS = {
     maxBoost: 120,
     boostDrainPerSec: 40,
     boostRegenPerSec: 46,
-    minSpeed: 32,
-    maxSpeed: 50,
-    boostSpeed: 95,
+    minSpeed: 22,
+    maxSpeed: 35,
+    boostSpeed: 60,
     turnRateDegPerSec: 95,
     pitchRateDegPerSec: 85,
     rollRateDegPerSec: 150,
@@ -147,8 +147,9 @@ export function createAircraft({
     boost: stats.maxBoost,
     maxBoost: stats.maxBoost,
     heat: 0,
-    missiles: stats.missiles,
-    maxMissiles: stats.missiles,
+    // Unlimited missiles, gated by a slow recharge cooldown.
+    missileCD: 0,                 // seconds until next missile is ready
+    missileReloadSec: 7,          // duration of full recharge
     flares: 5,
     maxFlares: 5,
     score: 0,
@@ -226,6 +227,7 @@ export function updateAircraft(plane, intent, dt) {
   // --- Cooldowns ------------------------------------------------------
   if (plane._maneuverCD > 0) plane._maneuverCD -= dt;
   if (plane.invincibleTimer > 0) plane.invincibleTimer -= dt;
+  if (plane.missileCD > 0) plane.missileCD = Math.max(0, plane.missileCD - dt);
 
   // --- Read current orientation as a quaternion ----------------------
   const r = body.rotation();
@@ -280,12 +282,19 @@ export function updateAircraft(plane, intent, dt) {
   plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, 6.0 * dt);
 
   const yawDelta   = plane._yawSmoothed   * THREE.MathUtils.degToRad(s.turnRateDegPerSec)  * dt;
-  const pitchDelta = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
+  let pitchDelta   = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
 
-  // Apply pitch then yaw in the plane's LOCAL frame. q.multiply(dq) means
-  // "rotate by dq in q's local axes" — works at any orientation including
-  // inverted flight (which you reach by holding the pitch input long enough
-  // to loop over the top).
+  // Clamp the pitch to ±80° so the camera, AI, and minimap stay in their
+  // sane Euler-friendly ranges. We measure current pitch from the forward
+  // vector's Y component (asin(fwd.y)) and never let the delta push past
+  // the limit.
+  const fwdNow = _v3.set(0, 0, -1).applyQuaternion(q);
+  const currentPitch = Math.asin(THREE.MathUtils.clamp(fwdNow.y, -1, 1));
+  const PITCH_LIMIT = THREE.MathUtils.degToRad(80);
+  const newPitch = THREE.MathUtils.clamp(currentPitch + pitchDelta, -PITCH_LIMIT, PITCH_LIMIT);
+  pitchDelta = newPitch - currentPitch;
+
+  // Apply pitch then yaw in the plane's LOCAL frame.
   const dqPitch = _qa.setFromAxisAngle(_axisX, pitchDelta);
   const dqYaw   = _qb.setFromAxisAngle(_axisY, yawDelta);
   q.multiply(dqPitch).multiply(dqYaw);

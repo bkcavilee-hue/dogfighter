@@ -25,12 +25,12 @@ export const MISSILE = {
 // time to react. AI in MP doesn't fire missiles at all (handled in engine).
 export const MISSILE_SLOW = {
   ...MISSILE,
-  initialSpeed: 18,
-  maxSpeed: 65,
-  acceleration: 25,
-  turnRateDegPerSec: 70,
+  initialSpeed: 16,
+  maxSpeed: 55,
+  acceleration: 22,
+  turnRateDegPerSec: 60,
   ttl: 10.0,
-  damage: 35,
+  damage: 22,                  // was 35 — AI hits hurt less now
 };
 
 const _v = new THREE.Vector3();

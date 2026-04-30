@@ -353,13 +353,14 @@ export async function startEngine() {
   startMatch(match);
 
   function resetMatch() {
-    // Reset every plane: full HP, score 0, alive, fresh missiles+flares, neutral pose.
+    // Reset every plane: full HP, score 0, alive, fresh flares, missile
+    // cooldown ready, neutral pose.
     for (const p of allPlanes) {
       p.score = 0;
       p.HP = p.maxHP;
       p.boost = p.maxBoost;
       p.heat = 0;
-      p.missiles = p.maxMissiles;
+      p.missileCD = 0;
       p.flares = p.maxFlares;
       p.alive = true;
       if (p.mesh) p.mesh.visible = true;
@@ -487,12 +488,12 @@ export async function startEngine() {
         playerTargets, scene, FIXED_DT, playerSoftLock, playerOnHit
       );
 
-      // Missile fire on Q tap.
-      if (consumeMissileTap() && player.missiles > 0 && playerMissileLock) {
+      // Missile fire on Q tap (unlimited ammo, gated by reload cooldown).
+      if (consumeMissileTap() && player.missileCD <= 0 && playerMissileLock) {
         if (matchModeKey === 'team2v2' && playerMissileLock.team === player.team) {
           // Refuse friendly missile lock.
         } else {
-          player.missiles -= 1;
+          player.missileCD = player.missileReloadSec;
           missiles.push(fireMissile({ shooter: player, target: playerMissileLock, scene }));
           if (isMultiplayer) {
             network.sendEvent({
@@ -549,11 +550,13 @@ export async function startEngine() {
         updateAircraft(e, aiIntent, FIXED_DT);
         // AI fires only at non-team planes.
         const targets = allPlanes.filter((p) => p.team !== e.team);
-        updateWeapons(e, aiWeapons[i], aiIntent.fire, targets, scene, FIXED_DT);
+        // AI gun does 60% of base damage so enemy hits are less punishing.
+        const aiOnHit = (target, damage, weapon) => applyDamage(target, damage * 0.6, e);
+        updateWeapons(e, aiWeapons[i], aiIntent.fire, targets, scene, FIXED_DT, null, aiOnHit);
         // AI missile launch (solo only — bots in MP don't fire missiles).
         // AI missiles use the SLOW profile so the player has time to react.
-        if (!isMultiplayer && aiIntent.missileFire && aiIntent.missileTarget && e.missiles > 0) {
-          e.missiles -= 1;
+        // AI's per-brain missileCD already throttles the rate — no ammo count.
+        if (!isMultiplayer && aiIntent.missileFire && aiIntent.missileTarget) {
           missiles.push(fireMissile({
             shooter: e,
             target: aiIntent.missileTarget,
