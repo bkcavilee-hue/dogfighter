@@ -57,13 +57,11 @@ export const MAPS = {
     label: 'Desert',
     paths: {
       island: '/assets/maps/island.glb',
-      ocean:  '/assets/maps/ocean.glb', // kept loadable but engine omits it
     },
     fit: {
       island: { length: 2800, lift: 0 },
-      ocean:  { length: 4000, lift: -1.0 },
     },
-    hasOcean: false,                    // desert: ocean stripped
+    hasOcean: false,
     hasUfoBoss: true,
     hasUfoDrones: true,
   },
@@ -265,7 +263,7 @@ export async function preloadArenaModels() {
       }
       arenaCache.set(key, root);
     } catch (err) {
-      console.warn(`[models] failed to load arena ${key} from ${ARENA_PATHS[key]}:`, err);
+      console.warn(`[models] failed to load arena ${key} from ${path}:`, err);
     }
   }));
 }
