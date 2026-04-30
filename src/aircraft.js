@@ -327,16 +327,16 @@ export function updateAircraft(plane, intent, dt) {
   }
 
   // --- Normal flight: pitch + yaw applied as LOCAL-FRAME rotations ---
-  // Quaternion-only model — no Euler heading/pitch state is kept. This
-  // means continuous pitch input traces a real vertical loop (no clamp
-  // needed) and yaw always feels right relative to the cockpit.
+  // Snappier response on input — drop the smoothing factor from 6→14 so
+  // the plane no longer feels stiff/auto-centered. Releasing inputs still
+  // eases (rather than snapping) for a clean feel without lag.
   const yawAxisTarget = THREE.MathUtils.clamp(intent.yaw || 0, -1, 1);
   if (plane._yawSmoothed === undefined) plane._yawSmoothed = 0;
-  plane._yawSmoothed += (yawAxisTarget - plane._yawSmoothed) * Math.min(1, 6.0 * dt);
+  plane._yawSmoothed += (yawAxisTarget - plane._yawSmoothed) * Math.min(1, 14.0 * dt);
 
   const pitchAxisTarget = THREE.MathUtils.clamp(intent.pitch || 0, -1, 1);
   if (plane._pitchSmoothed === undefined) plane._pitchSmoothed = 0;
-  plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, 6.0 * dt);
+  plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, 14.0 * dt);
 
   const yawDelta = plane._yawSmoothed * THREE.MathUtils.degToRad(s.turnRateDegPerSec) * dt;
 

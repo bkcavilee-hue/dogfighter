@@ -57,7 +57,7 @@ export function createHUD() {
     border-radius: 6px; font-family: monospace; font-size: 12px;
     letter-spacing: 0.08em;
   `;
-  banner.textContent = 'WASD/arrows · Space boost · E fire · Q missile · W×2 loop · A×2/D×2 dodge · S×2 flares';
+  banner.textContent = 'WASD/arrows · Space boost · E fire · Q missile · Tab cycle · Shift lock · W×2 loop · A×2/D×2 dodge · S×2 flares';
   document.body.appendChild(banner);
 
   // Reticle / lock overlay (full-screen canvas)
@@ -757,7 +757,7 @@ const _fwdTmp = new THREE.Vector3();
  * @param {Object|null} missileLock  - missile lock target (red bracket)
  * @param {number}      lockConfidence - 0..1 from weapon state
  */
-export function updateReticle(camera, player, enemies, softLock, missileLock, lockConfidence = 0, incomingMissiles = []) {
+export function updateReticle(camera, player, enemies, softLock, missileLock, lockConfidence = 0, incomingMissiles = [], manualTarget = null, manualCommitted = false) {
   if (!_rctx) return;
   _rctx.clearRect(0, 0, _reticle.width, _reticle.height);
   if (!player || !player.alive) return;
@@ -826,6 +826,24 @@ export function updateReticle(camera, player, enemies, softLock, missileLock, lo
       );
       const leadProj = _project(leadPos, camera);
       if (leadProj.visible) drawLeadMarker(_rctx, leadProj.x, leadProj.y, color);
+    }
+  }
+
+  // Manual target highlight (Tab/Shift). Dashed cyan = cycled but not yet
+  // committed; solid white outline = committed (acts as sticky lock).
+  if (manualTarget && manualTarget.alive) {
+    const mp = manualTarget.body.translation();
+    const proj = _project(_noseTmp.set(mp.x, mp.y, mp.z), camera);
+    if (proj.visible) {
+      const color = manualCommitted ? '#ffffff' : '#88e0ff';
+      drawManualBracket(_rctx, proj.x, proj.y, 28, color, manualCommitted);
+      _rctx.font = 'bold 10px monospace';
+      _rctx.fillStyle = color;
+      _rctx.textAlign = 'center';
+      _rctx.shadowColor = 'rgba(0,0,0,0.85)';
+      _rctx.shadowBlur = 2;
+      _rctx.fillText(manualCommitted ? 'LOCKED' : 'TARGET', proj.x, proj.y - 36);
+      _rctx.shadowBlur = 0;
     }
   }
 
@@ -1009,6 +1027,22 @@ function drawBracket(ctx, x, y, size, color) {
   ctx.moveTo(x - s, y + s - c); ctx.lineTo(x - s, y + s); ctx.lineTo(x - s + c, y + s);
   ctx.moveTo(x + s - c, y + s); ctx.lineTo(x + s, y + s); ctx.lineTo(x + s, y + s - c);
   ctx.stroke();
+}
+
+/** Manual target bracket — dashed when cycling, solid when committed. */
+function drawManualBracket(ctx, x, y, size, color, solid) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  if (!solid) ctx.setLineDash([6, 4]);
+  const s = size, c = 9;
+  ctx.beginPath();
+  ctx.moveTo(x - s, y - s + c); ctx.lineTo(x - s, y - s); ctx.lineTo(x - s + c, y - s);
+  ctx.moveTo(x + s - c, y - s); ctx.lineTo(x + s, y - s); ctx.lineTo(x + s, y - s + c);
+  ctx.moveTo(x - s, y + s - c); ctx.lineTo(x - s, y + s); ctx.lineTo(x - s + c, y + s);
+  ctx.moveTo(x + s - c, y + s); ctx.lineTo(x + s, y + s); ctx.lineTo(x + s, y + s - c);
+  ctx.stroke();
+  ctx.restore();
 }
 
 /** Small diamond marker indicating the lead point ahead of a moving target. */

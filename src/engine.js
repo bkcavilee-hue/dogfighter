@@ -5,6 +5,7 @@ import { initPhysics, world, syncMesh } from './physics.js';
 import {
   input, initInput, consumeMissileTap,
   consumeLoopTap, consumeRollLeftTap, consumeRollRightTap, consumeFlareTap,
+  consumeTabTap, consumeShiftTap,
 } from './input.js';
 import {
   ARENA, generateHeightmap, createTerrain, createOcean, createSky, setupLights,
@@ -234,6 +235,10 @@ export async function startEngine() {
   const flares = [];   // active decoy flares
   let playerSoftLock = null;
   let playerMissileLock = null;
+  // Manual targeting (Tab cycles, Shift commits). When committed, overrides
+  // both auto soft-lock and auto missile-lock.
+  let manualLockTarget = null;
+  let manualLockCommitted = false;
 
   // --- Multiplayer wiring ---------------------------------------------
   if (isMultiplayer) {
@@ -459,9 +464,55 @@ export async function startEngine() {
       };
       const flareTap = consumeFlareTap();
 
-      // Lock acquisition uses last frame's orientation (1/60s lag — fine).
-      playerSoftLock = findSoftLock(player, allPlanes);
-      playerMissileLock = findMissileLock(player, allPlanes);
+      // Manual targeting: Tab cycles through hostile candidates, Shift
+      // commits / unlocks. When a manual lock is held it overrides the
+      // auto soft-lock + missile-lock.
+      const tabbed = consumeTabTap();
+      const shifted = consumeShiftTap();
+      if (tabbed) {
+        // Build candidate list (hostile, alive, in front cone, in range).
+        const r = player.body.rotation();
+        const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
+        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+        const pp = player.body.translation();
+        const cosCone = Math.cos(THREE.MathUtils.degToRad(45));
+        const candidates = [];
+        for (const o of allPlanes) {
+          if (o === player || !o.alive || o.team === player.team) continue;
+          const op = o.body.translation();
+          const dx = op.x - pp.x, dy = op.y - pp.y, dz = op.z - pp.z;
+          const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+          if (dist > 800) continue;
+          const dot = (dx*fwd.x + dy*fwd.y + dz*fwd.z) / Math.max(dist, 1e-3);
+          if (dot < cosCone) continue;
+          candidates.push({ plane: o, dist });
+        }
+        candidates.sort((a, b) => a.dist - b.dist);
+        if (candidates.length) {
+          let idx = -1;
+          if (manualLockTarget) idx = candidates.findIndex((c) => c.plane === manualLockTarget);
+          const next = candidates[(idx + 1) % candidates.length];
+          manualLockTarget = next.plane;
+          manualLockCommitted = false;
+        }
+      }
+      if (shifted) {
+        if (manualLockTarget) {
+          manualLockCommitted = !manualLockCommitted;
+        }
+      }
+      // If the manual target died or escaped, drop it.
+      if (manualLockTarget && (!manualLockTarget.alive ||
+          manualLockTarget.team === player.team)) {
+        manualLockTarget = null;
+        manualLockCommitted = false;
+      }
+      playerSoftLock = manualLockCommitted && manualLockTarget
+        ? manualLockTarget
+        : findSoftLock(player, allPlanes);
+      playerMissileLock = manualLockCommitted && manualLockTarget
+        ? manualLockTarget
+        : findMissileLock(player, allPlanes);
 
       // Stickiness: if we lost the soft lock but still have built-up confidence
       // on the previous target, keep aiming at it (within 600m). Lets the
@@ -645,12 +696,15 @@ export async function startEngine() {
     // AND a banking tilt while turning (mesh-only — body stays auto-flat).
     for (const p of allPlanes) {
       syncMesh(p.mesh, p.body);
-      // Banking: lerp _bankRoll toward (yawSmoothed × MAX_BANK). Releasing
-      // input lets it level out toward 0.
+      // Banking: snap into bank fast, recenter slowly so the plane LOOKS
+      // committed to the turn instead of always trying to level out.
       if (p._yawSmoothed !== undefined) {
-        const targetBank = -p._yawSmoothed * (Math.PI / 6); // ±30° max
+        const targetBank = -p._yawSmoothed * (Math.PI / 5); // ±36° max
         p._bankRoll = (p._bankRoll || 0);
-        p._bankRoll += (targetBank - p._bankRoll) * Math.min(1, 4.0 * dt);
+        const intoLerp = 8.0;
+        const outLerp = 1.6;
+        const lerp = Math.abs(targetBank) > Math.abs(p._bankRoll) ? intoLerp : outLerp;
+        p._bankRoll += (targetBank - p._bankRoll) * Math.min(1, lerp * dt);
         if (Math.abs(p._bankRoll) > 0.001) {
           _maneuverQ.setFromAxisAngle(_axisZ, p._bankRoll);
           p.mesh.quaternion.multiply(_maneuverQ);
@@ -705,7 +759,11 @@ export async function startEngine() {
           )) < 250
         : false)
     ));
-    updateReticle(camera, player, enemies, playerSoftLock, playerMissileLock, playerWeapon.lockConfidence, incoming);
+    updateReticle(
+      camera, player, enemies, playerSoftLock, playerMissileLock,
+      playerWeapon.lockConfidence, incoming,
+      manualLockTarget, manualLockCommitted,
+    );
     updateMatchHUD(match);
 
     renderer.render(scene, camera);

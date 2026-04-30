@@ -15,6 +15,8 @@ export const input = {
   rollRightTap: false,   // D×2 or ArrowRight×2
   flareTap: false,       // S×2 or ArrowDown×2
   missilePressed: false, // Q first-press
+  tabPressed: false,     // Tab — cycle next lock candidate
+  shiftPressed: false,   // Shift — commit lock / unlock
 };
 
 const DOUBLE_TAP_MS = 280;
@@ -69,6 +71,13 @@ function keyDown(code) {
       if (!input.missile) input.missilePressed = true;
       input.missile = true;
       break;
+    case 'Tab':
+      input.tabPressed = true;
+      break;
+    case 'ShiftLeft':
+    case 'ShiftRight':
+      input.shiftPressed = true;
+      break;
   }
 }
 
@@ -90,11 +99,9 @@ function keyUp(code) {
 
 export function initInput() {
   window.addEventListener('keydown', (e) => {
-    // Browser extensions / password managers can dispatch synthetic keydowns
-    // without `code` set — guard so we don't crash startup.
     if (!e.code) return;
-    // Stop arrows from scrolling the page.
-    if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+    // Stop arrows / Space / Tab from scrolling-or-focus-jumping the page.
+    if (e.code.startsWith('Arrow') || e.code === 'Space' || e.code === 'Tab') e.preventDefault();
     keyDown(e.code);
   });
   window.addEventListener('keyup', (e) => {
@@ -114,6 +121,8 @@ export const consumeRollLeftTap    = () => _consume('rollLeftTap');
 export const consumeRollRightTap   = () => _consume('rollRightTap');
 export const consumeFlareTap       = () => _consume('flareTap');
 export const consumeMissileTap     = () => _consume('missilePressed');
+export const consumeTabTap         = () => _consume('tabPressed');
+export const consumeShiftTap       = () => _consume('shiftPressed');
 
 function _consume(key) {
   if (input[key]) { input[key] = false; return true; }
