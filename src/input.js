@@ -2,10 +2,12 @@
 // WASD and arrow keys are interchangeable. Double-tapping a direction triggers
 // a maneuver: W = loop, A = roll-left, D = roll-right, S = flares.
 export const input = {
-  climb: false,     // W or ArrowUp
-  dive: false,      // S or ArrowDown
-  left: false,      // A or ArrowLeft
-  right: false,     // D or ArrowRight
+  climb: false,     // W or ArrowUp   — pitch up
+  dive: false,      // S or ArrowDown — pitch down
+  bankL: false,     // A or ArrowLeft  — bank left (Star Fox: bank → turn)
+  bankR: false,     // D or ArrowRight — bank right
+  rudderL: false,   // Z — rudder yaw left (independent of bank)
+  rudderR: false,   // X — rudder yaw right
   boost: false,     // Space
   fire: false,      // E or LMB
   missile: false,   // Q (held)
@@ -57,13 +59,13 @@ function keyDown(code) {
       break;
     case 'KeyA':
     case 'ArrowLeft':
-      if (!input.left) tap('rollL');
-      input.left = true;
+      if (!input.bankL) tap('rollL');
+      input.bankL = true;
       break;
     case 'KeyD':
     case 'ArrowRight':
-      if (!input.right) tap('rollR');
-      input.right = true;
+      if (!input.bankR) tap('rollR');
+      input.bankR = true;
       break;
     case 'Space': input.boost = true; break;
     case 'KeyE': input.fire = true; break;
@@ -78,6 +80,8 @@ function keyDown(code) {
     case 'ShiftRight':
       input.shiftPressed = true;
       break;
+    case 'KeyZ': input.rudderL = true; break;
+    case 'KeyX': input.rudderR = true; break;
   }
 }
 
@@ -88,9 +92,11 @@ function keyUp(code) {
     case 'KeyS':
     case 'ArrowDown':  input.dive = false; break;
     case 'KeyA':
-    case 'ArrowLeft':  input.left = false; break;
+    case 'ArrowLeft':  input.bankL = false; break;
     case 'KeyD':
-    case 'ArrowRight': input.right = false; break;
+    case 'ArrowRight': input.bankR = false; break;
+    case 'KeyZ':       input.rudderL = false; break;
+    case 'KeyX':       input.rudderR = false; break;
     case 'Space':      input.boost = false; break;
     case 'KeyE':       input.fire = false; break;
     case 'KeyQ':       input.missile = false; break;

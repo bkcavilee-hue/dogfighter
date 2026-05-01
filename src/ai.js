@@ -73,7 +73,8 @@ const _qA = new THREE.Quaternion();
 const _qInv = new THREE.Quaternion();
 
 export function updateAI(plane, brain, allPlanes, dt) {
-  const intent = { yaw: 0, pitch: 0, boost: false, fire: false, missileFire: false };
+  // Star Fox controls: AI uses BANK to turn (banking induces yaw).
+  const intent = { bank: 0, rudder: 0, pitch: 0, boost: false, fire: false, missileFire: false };
   if (!plane.alive) {
     brain.lastHP = null;
     return intent;
@@ -103,7 +104,7 @@ export function updateAI(plane, brain, allPlanes, dt) {
     // yaw means "turn left" (matches the player's A key).
     const toOrigin = _aimVec.set(-pos.x, 0, -pos.z).normalize();
     toOrigin.applyQuaternion(_qInv);
-    intent.yaw = THREE.MathUtils.clamp(-toOrigin.x * 2.0, -1, 1);
+    intent.bank = THREE.MathUtils.clamp(-toOrigin.x * 2.0, -1, 1);
     intent.pitch = tooHigh ? -1 : 0;
     intent.boost = false;
     return intent;
@@ -134,7 +135,7 @@ export function updateAI(plane, brain, allPlanes, dt) {
   // --- State: EVADE ----------------------------------------------------
   if (brain.state === 'evade') {
     brain.evadeTimer -= dt;
-    intent.yaw = brain.evadeYawDir;
+    intent.bank = brain.evadeYawDir;
     intent.pitch = 0.7 * brain.evadePitchDir;
     intent.boost = true;
     if (brain.evadeTimer <= 0) {
@@ -146,7 +147,7 @@ export function updateAI(plane, brain, allPlanes, dt) {
   // --- State: PATROL (no target in range) -----------------------------
   if (!target) {
     brain.state = 'patrol';
-    intent.yaw = Math.sin(performance.now() * 0.0003 + (plane.id?.charCodeAt(0) ?? 0)) * 0.3;
+    intent.bank = Math.sin(performance.now() * 0.0003 + (plane.id?.charCodeAt(0) ?? 0)) * 0.3;
     brain.missileLockTimer = 0;
     return intent;
   }
@@ -177,11 +178,11 @@ export function updateAI(plane, brain, allPlanes, dt) {
   //   localAim.x: target's right offset  (+ = to our right)
   //   localAim.y: target's up    offset  (+ = above us)
   //   localAim.z: target's depth offset  (- = in front, since fwd = -Z)
-  // Yaw input is sign-flipped because intent.yaw=+1 means "turn left", but
-  // a target on our LEFT has localAim.x < 0.
+  // Bank input is sign-flipped because intent.bank=+1 means "bank left",
+  // but a target on our LEFT has localAim.x < 0.
   const localAim = _aimVec.set(aimX, aimY, aimZ).normalize();
   localAim.applyQuaternion(_qInv);
-  intent.yaw   = THREE.MathUtils.clamp(-localAim.x * cfg.yawAimGain, -1, 1);
+  intent.bank  = THREE.MathUtils.clamp(-localAim.x * cfg.yawAimGain, -1, 1);
   intent.pitch = THREE.MathUtils.clamp( localAim.y * cfg.pitchAimGain, -1, 1);
 
   intent.boost = dist > cfg.boostRange;

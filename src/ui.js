@@ -57,7 +57,7 @@ export function createHUD() {
     border-radius: 6px; font-family: monospace; font-size: 12px;
     letter-spacing: 0.08em;
   `;
-  banner.textContent = 'WASD/arrows · Space boost · E fire · Q missile · Tab cycle · Shift lock · W×2 loop · A×2/D×2 dodge · S×2 flares';
+  banner.textContent = 'W/S pitch · A/D bank-to-turn · Z/X rudder · Space boost · E fire · Q missile · Tab cycle · Shift lock · A×2/D×2 dodge · S×2 flares';
   document.body.appendChild(banner);
 
   // Reticle / lock overlay (full-screen canvas)
@@ -188,8 +188,8 @@ export function createHUD() {
         cursor:pointer;font-family:inherit;
       ">LAUNCH MATCH</button>
       <div style="opacity:0.45;font-size:11px;margin-top:18px;font-family:monospace;letter-spacing:0.15em;line-height:1.6;">
-        WASD/ARROWS · SPACE BOOST · E FIRE · Q MISSILE<br>
-        W×2 LOOP · A×2/D×2 DODGE · S×2 FLARES · HOLD S TO LOOP
+        W/S PITCH · A/D BANK-TURN · Z/X RUDDER · SPACE BOOST<br>
+        E FIRE · Q MISSILE · TAB CYCLE · SHIFT LOCK · A×2/D×2 DODGE · S×2 FLARES
       </div>
     </div>
     <style>

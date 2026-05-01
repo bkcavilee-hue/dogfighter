@@ -328,29 +328,51 @@ export function updateAircraft(plane, intent, dt) {
   // Snappier response on input — drop the smoothing factor from 6→14 so
   // the plane no longer feels stiff/auto-centered. Releasing inputs still
   // eases (rather than snapping) for a clean feel without lag.
-  const yawAxisTarget = THREE.MathUtils.clamp(intent.yaw || 0, -1, 1);
-  if (plane._yawSmoothed === undefined) plane._yawSmoothed = 0;
-  plane._yawSmoothed += (yawAxisTarget - plane._yawSmoothed) * Math.min(1, 14.0 * dt);
-
+  // Pitch input smoothing (yaw smoothing replaced by bank+rudder model below).
   const pitchAxisTarget = THREE.MathUtils.clamp(intent.pitch || 0, -1, 1);
   if (plane._pitchSmoothed === undefined) plane._pitchSmoothed = 0;
   plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, 14.0 * dt);
 
-  // Body rotation: real pitch + yaw + auto-bank coordinated turn.
-  // Bank: target roll proportional to yaw input. Eases in fast, out slow.
-  // Applied as per-frame delta so accumulated rotation stays bounded.
-  const MAX_BANK = THREE.MathUtils.degToRad(45);
-  const targetBank = -plane._yawSmoothed * MAX_BANK;
-  if (plane._bankAngle === undefined) plane._bankAngle = 0;
-  const intoBank = 6.0;
-  const outBank = 2.5;
-  const bankLerp = Math.abs(targetBank) > Math.abs(plane._bankAngle) ? intoBank : outBank;
-  const newBank = plane._bankAngle + (targetBank - plane._bankAngle) * Math.min(1, bankLerp * dt);
-  const bankDelta = newBank - plane._bankAngle;
-  plane._bankAngle = newBank;
+  // STAR FOX flight model:
+  //   - Bank input (A/D, smoothed) rolls the plane around its forward axis.
+  //   - The plane's bank ANGLE drives an automatic yaw: banking IS turning.
+  //   - Rudder input (Z/X) gives a direct yaw without banking, for fine
+  //     trims and to skid through aim adjustments.
+  //   - Pitch is direct (W/S).
+  const MAX_BANK = THREE.MathUtils.degToRad(70);
+  const BANK_TO_YAW_RATE = 1.2; // multiplier from sin(bank) → yaw rate
 
-  const yawDelta   = plane._yawSmoothed   * THREE.MathUtils.degToRad(s.turnRateDegPerSec)  * dt;
-  let pitchDelta   = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
+  // Smoothed bank input.
+  if (plane._bankInputSmoothed === undefined) plane._bankInputSmoothed = 0;
+  const bankInputTarget = THREE.MathUtils.clamp(intent.bank || 0, -1, 1);
+  plane._bankInputSmoothed += (bankInputTarget - plane._bankInputSmoothed) * Math.min(1, 14 * dt);
+
+  // Smoothed rudder input.
+  if (plane._rudderSmoothed === undefined) plane._rudderSmoothed = 0;
+  const rudderTarget = THREE.MathUtils.clamp(intent.rudder || 0, -1, 1);
+  plane._rudderSmoothed += (rudderTarget - plane._rudderSmoothed) * Math.min(1, 14 * dt);
+
+  // Track integrated bank angle so we can clamp it AND so bank-induced yaw
+  // can read the current bank as sin(angle).
+  if (plane._bank === undefined) plane._bank = 0;
+  const BANK_RATE = THREE.MathUtils.degToRad(s.turnRateDegPerSec) * 1.2; // bank rolls fast
+  const bankInputDelta = plane._bankInputSmoothed * BANK_RATE * dt;
+  // Auto-level: when no bank input held, decay current bank toward 0.
+  let levelDelta = 0;
+  if (Math.abs(plane._bankInputSmoothed) < 0.05 && Math.abs(plane._bank) > 0.001) {
+    levelDelta = -plane._bank * Math.min(1, 1.4 * dt);
+  }
+  const bankDelta = THREE.MathUtils.clamp(
+    plane._bank + bankInputDelta + levelDelta, -MAX_BANK, MAX_BANK,
+  ) - plane._bank;
+  plane._bank += bankDelta;
+
+  // Bank-induced yaw + rudder yaw (combined yaw delta).
+  const bankYawRate = -Math.sin(plane._bank) * BANK_TO_YAW_RATE;
+  const rudderYawRate = plane._rudderSmoothed * THREE.MathUtils.degToRad(s.turnRateDegPerSec) * 0.6;
+  const yawDelta = (bankYawRate + rudderYawRate) * dt;
+
+  let pitchDelta = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
 
   // Pitch clamp ±70°: derive current pitch from forward.y, never let the
   // delta push past the limit.

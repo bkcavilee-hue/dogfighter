@@ -30,41 +30,59 @@ export const cameraConfig = {
 let _smoothedLookAt = new THREE.Vector3();
 let _initialized = false;
 
-// Cockpit-chase camera: locked to the jet's local frame, so when the jet
-// banks/pitches/yaws the camera does too — the world rolls around the
-// player. Camera offset (height, back) is in the jet's LOCAL coordinates,
-// not world. lookAt is also a fixed forward point in the local frame.
+// Yaw-follow camera (Camera C): the camera tracks the jet's heading and
+// follows pitch SOFTLY (~40%), but never rolls. World-up is preserved so
+// the horizon stays level even when the jet banks hard.
+const _planeQ = new THREE.Quaternion();
+const _camQ = new THREE.Quaternion();
+const _yawQ = new THREE.Quaternion();
+const _pitchQ = new THREE.Quaternion();
+const _Y = new THREE.Vector3(0, 1, 0);
+const _X = new THREE.Vector3(1, 0, 0);
+const _camForward = new THREE.Vector3();
+
 export function updateChaseCamera(camera, plane) {
   if (!plane) return;
   const r = plane.body.rotation();
-  _q.set(r.x, r.y, r.z, r.w);
+  _planeQ.set(r.x, r.y, r.z, r.w);
 
   const t = plane.body.translation();
   _targetPos.set(t.x, t.y, t.z);
 
-  // Local offset: behind (+Z), above (+Y) the plane in its own frame.
-  const localOffset = _camPos.set(0, cameraConfig.height, cameraConfig.back).applyQuaternion(_q);
+  // Extract heading (yaw around world Y) from the jet's forward vector.
+  _camForward.set(0, 0, -1).applyQuaternion(_planeQ);
+  const heading = Math.atan2(-_camForward.x, -_camForward.z);
+  // Extract pitch from forward.y; soft-follow at PITCH_FOLLOW.
+  const pitch = Math.asin(THREE.MathUtils.clamp(_camForward.y, -1, 1));
+  const PITCH_FOLLOW = 0.4;
+
+  // Build camera orientation: yaw + softened pitch, NO roll.
+  _yawQ.setFromAxisAngle(_Y, heading);
+  _pitchQ.setFromAxisAngle(_X, pitch * PITCH_FOLLOW);
+  _camQ.copy(_yawQ).multiply(_pitchQ);
+
+  // Position offset in this synthetic frame: behind + above, no bank.
+  const localOffset = _camPos.set(0, cameraConfig.height, cameraConfig.back).applyQuaternion(_camQ);
   const desiredCamPos = _v.copy(_targetPos).add(localOffset);
 
-  // Look-at point: forward (-Z) of the plane in its own frame.
+  // Look-at point ahead of the plane along its TRUE forward — so steep
+  // dives still look like dives even if the camera pitch follow is soft.
   const lookAhead = _smoothedLookAt.copy(_targetPos)
-    .add(_forward.set(0, 0, -cameraConfig.lookAheadMeters).applyQuaternion(_q));
+    .add(_forward.set(0, 0, -1).applyQuaternion(_planeQ).multiplyScalar(cameraConfig.lookAheadMeters));
 
   if (!_initialized) {
     camera.position.copy(desiredCamPos);
-    camera.quaternion.copy(_q);
+    _smoothedLookAt.copy(lookAhead);
     _initialized = true;
   } else {
     camera.position.lerp(desiredCamPos, cameraConfig.followLerp);
-    // Slerp camera quaternion toward jet quaternion so banks/pitches feel
-    // physical instead of snappy.
-    camera.quaternion.slerp(_q, cameraConfig.rotLerp);
+    _smoothedLookAt.lerp(lookAhead, cameraConfig.lookLerp);
   }
 
-  // Always re-aim at the look-ahead so the player sees what they're flying
-  // into. Combined with the slerp, this gives a slight settle on the jet.
-  camera.up.set(0, 1, 0).applyQuaternion(camera.quaternion);
-  camera.lookAt(lookAhead);
+  // World-up always so the horizon stays level. lookAt builds a roll-free
+  // orientation toward the look-ahead point.
+  camera.up.set(0, 1, 0);
+  camera.lookAt(_smoothedLookAt);
 }
 
 // Mouse wheel zoom — adjusts height/back proportionally.
