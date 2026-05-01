@@ -7,6 +7,7 @@ const _camPos = new THREE.Vector3();
 const _lookAt = new THREE.Vector3();
 const _forward = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _v = new THREE.Vector3();
 
 export function createCamera() {
   const cam = new THREE.PerspectiveCamera(
@@ -18,47 +19,52 @@ export function createCamera() {
 }
 
 export const cameraConfig = {
-  height: 5,           // meters above plane (very close — plane is always level)
-  back: 22,            // meters behind plane (closer zoom)
-  followLerp: 0.10,
-  lookLerp: 0.18,
-  lookAheadMeters: 90, // aim further down the nose
+  height: 4,           // meters above plane in its LOCAL frame
+  back: 18,            // meters behind plane in its LOCAL frame
+  followLerp: 0.18,
+  lookLerp: 0.22,
+  rotLerp: 0.20,       // how aggressively the camera matches plane rotation
+  lookAheadMeters: 90,
 };
 
 let _smoothedLookAt = new THREE.Vector3();
 let _initialized = false;
 
+// Cockpit-chase camera: locked to the jet's local frame, so when the jet
+// banks/pitches/yaws the camera does too — the world rolls around the
+// player. Camera offset (height, back) is in the jet's LOCAL coordinates,
+// not world. lookAt is also a fixed forward point in the local frame.
 export function updateChaseCamera(camera, plane) {
   if (!plane) return;
   const r = plane.body.rotation();
   _q.set(r.x, r.y, r.z, r.w);
-  _forward.set(0, 0, -1).applyQuaternion(_q);
 
   const t = plane.body.translation();
   _targetPos.set(t.x, t.y, t.z);
 
-  // Use full forward vector (including pitch) for behind-shoulder chase —
-  // when the plane dives, the camera dives with it.
-  const back = _forward.clone().normalize();
+  // Local offset: behind (+Z), above (+Y) the plane in its own frame.
+  const localOffset = _camPos.set(0, cameraConfig.height, cameraConfig.back).applyQuaternion(_q);
+  const desiredCamPos = _v.copy(_targetPos).add(localOffset);
 
-  _camPos.copy(_targetPos)
-    .addScaledVector(back, -cameraConfig.back)
-    .add(new THREE.Vector3(0, cameraConfig.height, 0));
-
-  // Look at a point in FRONT of the plane so the player can see what they're
-  // flying into, not stare at their own tail.
-  const lookAhead = _targetPos.clone().addScaledVector(back, cameraConfig.lookAheadMeters);
+  // Look-at point: forward (-Z) of the plane in its own frame.
+  const lookAhead = _smoothedLookAt.copy(_targetPos)
+    .add(_forward.set(0, 0, -cameraConfig.lookAheadMeters).applyQuaternion(_q));
 
   if (!_initialized) {
-    camera.position.copy(_camPos);
-    _smoothedLookAt.copy(lookAhead);
+    camera.position.copy(desiredCamPos);
+    camera.quaternion.copy(_q);
     _initialized = true;
   } else {
-    camera.position.lerp(_camPos, cameraConfig.followLerp);
-    _smoothedLookAt.lerp(lookAhead, cameraConfig.lookLerp);
+    camera.position.lerp(desiredCamPos, cameraConfig.followLerp);
+    // Slerp camera quaternion toward jet quaternion so banks/pitches feel
+    // physical instead of snappy.
+    camera.quaternion.slerp(_q, cameraConfig.rotLerp);
   }
 
-  camera.lookAt(_smoothedLookAt);
+  // Always re-aim at the look-ahead so the player sees what they're flying
+  // into. Combined with the slerp, this gives a slight settle on the jet.
+  camera.up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+  camera.lookAt(lookAhead);
 }
 
 // Mouse wheel zoom — adjusts height/back proportionally.

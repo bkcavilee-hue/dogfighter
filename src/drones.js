@@ -8,15 +8,18 @@ import { applyDamage } from './gamestate.js';
 const DRONE_TEAM = 'ufo';
 const DRONE_HP = 60;
 const DRONE_RADIUS = 3.0;
-const DRONE_LASER_DAMAGE = 1.2;
-const DRONE_FIRE_RATE = 8;          // shots/sec
+const DRONE_LASER_DAMAGE = 1.0;             // very low — burst-fire compensates
 const DRONE_LASER_RANGE = 500;
-const DRONE_LASER_TTL = 0.07;
+const DRONE_LASER_TTL = 0.08;
 const DRONE_LASER_COLOR = 0x44ff77;
 const DRONE_DETECTION_RANGE = 700;
 const DRONE_ORBIT_RADIUS = 220;
-const DRONE_ORBIT_SPEED = 0.25;     // rad/sec
+const DRONE_ORBIT_SPEED = 0.25;             // rad/sec base
 const DRONE_HEIGHT = 320;
+// Burst fire pattern.
+const DRONE_BURST_COUNT = 3;
+const DRONE_BURST_SHOT_INTERVAL = 0.13;     // s between shots in a burst
+const DRONE_BURST_REST = 1.5;               // s between bursts
 
 const MINE_HP = 25;
 const MINE_DAMAGE = 35;
@@ -90,10 +93,20 @@ function createDrone({ scene, getMeshFn, position, orbitPhase, index }) {
     orbitPhase,
     orbitRadius: DRONE_ORBIT_RADIUS,
     color: DRONE_LASER_COLOR,
-    _fireAccumulator: 0,
+    // Burst fire state
+    _burstShotsLeft: 0,
+    _burstNextShotAt: 0,
+    _burstRestTimer: 0,
     _activeBeams: [],
     _mineCooldown: MINE_DEPLOY_DELAY,
-    _mine: null, // active mine, or null
+    _mine: null,
+    // Multi-axis spin & bob (per-drone seeds)
+    _spinX: Math.random() * 0.6 + 0.3,
+    _spinY: Math.random() * 1.2 + 0.6,
+    _spinZ: Math.random() * 0.6 + 0.3,
+    _bobPhase: Math.random() * Math.PI * 2,
+    _bobAmp: 8 + Math.random() * 4,
+    _bobSpeed: 0.6 + Math.random() * 0.5,
   };
 }
 
@@ -124,28 +137,41 @@ export function updateDrones(drones, mines, allPlanes, scene, dt) {
       continue;
     }
 
-    // Orbit motion around origin.
+    // Orbit + vertical bob.
     d.orbitPhase += DRONE_ORBIT_SPEED * dt;
+    d._bobPhase += d._bobSpeed * dt;
     const x = Math.cos(d.orbitPhase) * d.orbitRadius;
     const z = Math.sin(d.orbitPhase) * d.orbitRadius;
-    d.body._position.set(x, DRONE_HEIGHT, z);
-    d.mesh.position.set(x, DRONE_HEIGHT, z);
-    d.mesh.rotation.y += 1.2 * dt;
-    if (d.halo) d.halo.position.set(x, DRONE_HEIGHT, z);
+    const y = DRONE_HEIGHT + Math.sin(d._bobPhase) * d._bobAmp;
+    d.body._position.set(x, y, z);
+    d.mesh.position.set(x, y, z);
+    // Multi-axis spin
+    d.mesh.rotation.y += d._spinY * dt;
+    d.mesh.rotation.x += d._spinX * dt * 0.5;
+    d.mesh.rotation.z += d._spinZ * dt * 0.4;
+    if (d.halo) d.halo.position.set(x, y, z);
 
     // Find closest hostile.
-    let target = findClosest(d, allPlanes);
+    const target = findClosest(d, allPlanes);
 
-    // Rapid-fire laser at target.
+    // Burst-fire state machine: BURSTING → RESTING → BURSTING …
     if (target) {
-      d._fireAccumulator += dt;
-      const interval = 1 / DRONE_FIRE_RATE;
-      while (d._fireAccumulator >= interval) {
-        d._fireAccumulator -= interval;
-        fireDroneLaser(d, target, allPlanes, scene);
+      d._burstRestTimer = Math.max(0, d._burstRestTimer - dt);
+      d._burstNextShotAt = Math.max(0, d._burstNextShotAt - dt);
+      if (d._burstShotsLeft > 0) {
+        if (d._burstNextShotAt <= 0) {
+          fireDroneLaser(d, target, allPlanes, scene);
+          d._burstShotsLeft -= 1;
+          d._burstNextShotAt = DRONE_BURST_SHOT_INTERVAL;
+          if (d._burstShotsLeft === 0) d._burstRestTimer = DRONE_BURST_REST;
+        }
+      } else if (d._burstRestTimer <= 0) {
+        d._burstShotsLeft = DRONE_BURST_COUNT;
+        d._burstNextShotAt = 0;
       }
     } else {
-      d._fireAccumulator = 0;
+      d._burstShotsLeft = 0;
+      d._burstRestTimer = 0;
     }
 
     // Mine management: deploy when cooldown elapsed and no active mine.

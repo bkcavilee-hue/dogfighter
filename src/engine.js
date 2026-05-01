@@ -33,6 +33,7 @@ import {
 import { createUfoBoss, updateUfoBoss } from './ufo.js';
 import { createDrones, updateDrones, updateMines } from './drones.js';
 import { tickFX, tickContrail } from './fx.js';
+import { spawnDeathTumble, tickDeathTumbles } from './death-fx.js';
 import {
   initAudio, unlockAudio, sfxFlare, sfxManeuver, sfxLockWarning,
 } from './audio.js';
@@ -695,21 +696,15 @@ export async function startEngine() {
     // Sync render meshes to physics bodies. Apply maneuver visual offset
     // AND a banking tilt while turning (mesh-only — body stays auto-flat).
     for (const p of allPlanes) {
-      syncMesh(p.mesh, p.body);
-      // Banking: snap into bank fast, recenter slowly so the plane LOOKS
-      // committed to the turn instead of always trying to level out.
-      if (p._yawSmoothed !== undefined) {
-        const targetBank = -p._yawSmoothed * (Math.PI / 5); // ±36° max
-        p._bankRoll = (p._bankRoll || 0);
-        const intoLerp = 8.0;
-        const outLerp = 1.6;
-        const lerp = Math.abs(targetBank) > Math.abs(p._bankRoll) ? intoLerp : outLerp;
-        p._bankRoll += (targetBank - p._bankRoll) * Math.min(1, lerp * dt);
-        if (Math.abs(p._bankRoll) > 0.001) {
-          _maneuverQ.setFromAxisAngle(_axisZ, p._bankRoll);
-          p.mesh.quaternion.multiply(_maneuverQ);
-        }
+      // Death detection: alive flipped from true → false this frame? Spawn
+      // a wreckage tumble before we hide the source mesh.
+      if (p._wasAlive === undefined) p._wasAlive = p.alive;
+      if (p._wasAlive && !p.alive && !p.isUfo) {
+        spawnDeathTumble(scene, p);
       }
+      p._wasAlive = p.alive;
+
+      syncMesh(p.mesh, p.body);
       if (p._maneuver) {
         _maneuverQ.setFromAxisAngle(p._maneuver.visualAxis, p._maneuver.visualAngle);
         p.mesh.quaternion.multiply(_maneuverQ);
@@ -741,6 +736,7 @@ export async function startEngine() {
     // Visuals
     ocean.material.uniforms.uTime.value = elapsed;
     tickFX(dt);
+    tickDeathTumbles(scene, dt);
     for (const p of allPlanes) tickContrail(scene, p, dt);
     updateChaseCamera(camera, player);
     updateHUD(player);

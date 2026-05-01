@@ -300,12 +300,12 @@ export function updateAircraft(plane, intent, dt) {
     m.visualAngle = (1 - m.timer / m.duration) * Math.PI * 2;
 
     const fwd = _v3.set(0, 0, -1).applyQuaternion(q);
-    let vx = fwd.x * speed, vz = fwd.z * speed;
-    let vy = (plane._pitchSmoothed || 0) * (s.pitchRateDegPerSec * 0.35);
+    let vx = fwd.x * speed, vy = fwd.y * speed, vz = fwd.z * speed;
     if (m.dodgeSpeed) {
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
       const push = m.dodgeSpeed * m.dodgeDir;
       vx += right.x * push;
+      vy += right.y * push;
       vz += right.z * push;
     }
     body.setLinvel({ x: vx, y: vy, z: vz }, true);
@@ -313,12 +313,10 @@ export function updateAircraft(plane, intent, dt) {
 
     m.timer -= dt;
     if (m.timer <= 0) {
-      // Bake in persistent lateral velocity so the plane stays "out" to
-      // the side instead of snapping back to centered flight.
       if (m.persistVel > 0 && m.dodgeSpeed) {
         plane._lateralRemain = m.persistVel;
         plane._lateralDir = m.dodgeDir;
-        plane._lateralStartSpeed = m.dodgeSpeed * 0.5; // half the in-roll push
+        plane._lateralStartSpeed = m.dodgeSpeed * 0.5;
       }
       plane._maneuver = null;
     }
@@ -338,38 +336,53 @@ export function updateAircraft(plane, intent, dt) {
   if (plane._pitchSmoothed === undefined) plane._pitchSmoothed = 0;
   plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, 14.0 * dt);
 
-  const yawDelta = plane._yawSmoothed * THREE.MathUtils.degToRad(s.turnRateDegPerSec) * dt;
+  // Body rotation: real pitch + yaw + auto-bank coordinated turn.
+  // Bank: target roll proportional to yaw input. Eases in fast, out slow.
+  // Applied as per-frame delta so accumulated rotation stays bounded.
+  const MAX_BANK = THREE.MathUtils.degToRad(45);
+  const targetBank = -plane._yawSmoothed * MAX_BANK;
+  if (plane._bankAngle === undefined) plane._bankAngle = 0;
+  const intoBank = 6.0;
+  const outBank = 2.5;
+  const bankLerp = Math.abs(targetBank) > Math.abs(plane._bankAngle) ? intoBank : outBank;
+  const newBank = plane._bankAngle + (targetBank - plane._bankAngle) * Math.min(1, bankLerp * dt);
+  const bankDelta = newBank - plane._bankAngle;
+  plane._bankAngle = newBank;
 
-  // AUTO-FLATTEN MODEL: the plane is always horizontal. Yaw rotates the
-  // heading; W/S translates directly into vertical velocity. There's no
-  // pitch axis on the body at all, so the camera stays steady, weapons
-  // always fire level, and AI doesn't fight a tilted forward vector.
-  // Apply ONLY yaw to the body.
-  const dqYaw = _qb.setFromAxisAngle(_axisY, yawDelta);
-  q.multiply(dqYaw);
+  const yawDelta   = plane._yawSmoothed   * THREE.MathUtils.degToRad(s.turnRateDegPerSec)  * dt;
+  let pitchDelta   = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
+
+  // Pitch clamp ±70°: derive current pitch from forward.y, never let the
+  // delta push past the limit.
+  const fwdNow = _v3.set(0, 0, -1).applyQuaternion(q);
+  const currentPitch = Math.asin(THREE.MathUtils.clamp(fwdNow.y, -1, 1));
+  const PITCH_LIMIT = THREE.MathUtils.degToRad(70);
+  const newPitch = THREE.MathUtils.clamp(currentPitch + pitchDelta, -PITCH_LIMIT, PITCH_LIMIT);
+  pitchDelta = newPitch - currentPitch;
+
+  const dqPitch = _qa.setFromAxisAngle(_axisX, pitchDelta);
+  const dqYaw   = _qb.setFromAxisAngle(_axisY, yawDelta);
+  const dqBank  = _qc.setFromAxisAngle(new THREE.Vector3(0, 0, 1), bankDelta);
+  q.multiply(dqPitch).multiply(dqYaw).multiply(dqBank);
   q.normalize();
 
   body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
 
+  // Velocity along the plane's REAL forward (now affected by pitch + bank).
   const forward = _v3.set(0, 0, -1).applyQuaternion(q);
-  const verticalSpeed = plane._pitchSmoothed * (s.pitchRateDegPerSec * 0.35);
   let vx = forward.x * speed;
+  let vy = forward.y * speed;
   let vz = forward.z * speed;
-  // Persistent lateral velocity from a recent dodge — fades over its life.
   if (plane._lateralRemain > 0 && plane._lateralStartSpeed) {
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
-    // Linear fade: full at start, zero at end of the persist window.
-    const startWindow = 1.5; // matches MANEUVERS.persistVel
+    const startWindow = 1.5;
     const t = Math.max(0, Math.min(1, plane._lateralRemain / startWindow));
     const push = plane._lateralStartSpeed * plane._lateralDir * t;
     vx += right.x * push;
+    vy += right.y * push;
     vz += right.z * push;
   }
-  body.setLinvel({
-    x: vx,
-    y: verticalSpeed,
-    z: vz,
-  }, true);
+  body.setLinvel({ x: vx, y: vy, z: vz }, true);
   body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
   plane.speed = speed;

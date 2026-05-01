@@ -10,15 +10,17 @@ import * as THREE from 'three';
 import { applyDamage } from './gamestate.js';
 import { getArenaModel } from './models.js';
 
-const UFO_TEAM = 'ufo';            // distinct so all human teams treat it as an enemy
-const UFO_HP = 700;                // ~10× a normal interceptor
-const UFO_RADIUS = 8;              // collider for hit detection
+const UFO_TEAM = 'ufo';
+const UFO_HP = 700;                  // ~10× interceptor
+const UFO_RADIUS = 8;
 const UFO_LASER_RANGE = 900;
-const UFO_LASER_DAMAGE = 6;
-const UFO_LASER_COOLDOWN = 3.0;    // s between volleys
-const UFO_LASER_TTL = 0.25;        // visual lifetime per beam
+const UFO_LASER_DPS = 10;            // damage per second while sustained beam connects
+const UFO_BEAM_CHARGE_SEC = 0.4;     // wind-up before beam ignites
+const UFO_BEAM_RECOVER_SEC = 0.6;    // brief pause if target lost / dies
 const UFO_GREEN = 0x44ff77;
 const UFO_DETECTION_RANGE = 1400;
+const UFO_DRIFT_SPEED = 6;           // m/s drift between waypoints
+const UFO_DRIFT_RADIUS = 200;        // wander region around origin
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -43,7 +45,6 @@ function buildMesh(getMeshFn) {
     // Scale up — UFO mesh defaults to plane-sized; we want it imposing.
     mesh.scale.setScalar(2.4);
   } else {
-    // Fallback: glowing green disc with a top dome.
     mesh = new THREE.Group();
     const disc = new THREE.Mesh(
       new THREE.CylinderGeometry(7, 9, 2, 24),
@@ -56,6 +57,18 @@ function buildMesh(getMeshFn) {
     dome.position.y = 1;
     mesh.add(disc, dome);
   }
+  // Tractor-beam cone (always present, visibility/scale driven each tick).
+  const cone = new THREE.Mesh(
+    new THREE.ConeGeometry(8, 50, 18, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: UFO_GREEN, transparent: true, opacity: 0.0,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    }),
+  );
+  cone.rotation.x = Math.PI; // tip points down
+  cone.position.y = -25;
+  cone.userData.isTractor = true;
+  mesh.add(cone);
   return mesh;
 }
 
@@ -99,9 +112,20 @@ export function createUfoBoss({ scene, position, getMeshFn = null }) {
       missiles: 0,
     },
     body: makeStaticBody(position),
-    _laserCD: 1.5,                  // first volley after a short delay
-    _activeBeams: [],               // visual beam meshes
-    color: UFO_GREEN,               // for minimap to use
+    color: UFO_GREEN,
+    // Sustained beam state.
+    _beamState: 'idle',             // 'idle' | 'charging' | 'firing' | 'recover'
+    _beamTimer: 0,
+    _beamTarget: null,
+    _beamLine: null,
+    _beamLight: null,
+    // Motion state.
+    _spinX: Math.random() * 0.4 + 0.1,   // rad/s
+    _spinY: Math.random() * 0.6 + 0.4,
+    _spinZ: Math.random() * 0.3 + 0.1,
+    _bobPhase: Math.random() * Math.PI * 2,
+    _driftTarget: position.clone(),
+    _driftTimer: 0,
   };
 }
 
@@ -121,101 +145,151 @@ function makeStaticBody(position) {
   };
 }
 
-/** Per-frame tick: hover spin, periodic 3-laser volleys at the closest target. */
+/** Per-frame tick: drift / spin / bob, then sustained beam state machine. */
 export function updateUfoBoss(ufo, allPlanes, scene, dt) {
   if (!ufo.alive) {
-    if (ufo.HP <= 0 && ufo.mesh.parent) {
-      // Cleanup on death
+    if (ufo.HP <= 0 && ufo.mesh && ufo.mesh.parent) {
       scene.remove(ufo.mesh);
       if (ufo.halo) scene.remove(ufo.halo);
+      if (ufo._beamLine) scene.remove(ufo._beamLine);
+      if (ufo._beamLight) scene.remove(ufo._beamLight);
       ufo.mesh = null;
     }
     return;
   }
 
-  // Slow spin for visual flair.
-  ufo.mesh.rotation.y += 0.6 * dt;
+  // ---- Motion: drift + bob + multi-axis spin ----------------------
+  ufo._driftTimer -= dt;
+  if (ufo._driftTimer <= 0) {
+    const r = UFO_DRIFT_RADIUS;
+    ufo._driftTarget.set(
+      (Math.random() - 0.5) * 2 * r,
+      350 + (Math.random() - 0.5) * 80,
+      (Math.random() - 0.5) * 2 * r,
+    );
+    ufo._driftTimer = 6 + Math.random() * 4;
+  }
+  const cur = ufo.body.translation();
+  const dx = ufo._driftTarget.x - cur.x;
+  const dy = ufo._driftTarget.y - cur.y;
+  const dz = ufo._driftTarget.z - cur.z;
+  const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+  const step = Math.min(UFO_DRIFT_SPEED * dt, dist);
+  ufo._bobPhase += dt;
+  const bob = Math.sin(ufo._bobPhase * 0.6) * 4;
+  const newX = cur.x + (dx / dist) * step;
+  const newY = cur.y + (dy / dist) * step + bob * dt;
+  const newZ = cur.z + (dz / dist) * step;
+  ufo.body.setTranslation({ x: newX, y: newY, z: newZ });
+  ufo.mesh.position.set(newX, newY, newZ);
+  if (ufo.halo) ufo.halo.position.set(newX, newY + 4, newZ);
 
-  // Find closest hostile (anything not on team UFO).
+  // Multi-axis spin
+  ufo.mesh.rotation.y += ufo._spinY * dt;
+  ufo.mesh.rotation.x += ufo._spinX * dt * 0.4;
+  ufo.mesh.rotation.z += ufo._spinZ * dt * 0.3;
+
+  // Tractor cone visibility — pulses when charging, holds bright when firing.
+  const cone = ufo.mesh.children.find((c) => c.userData?.isTractor);
+  if (cone) {
+    let target = 0;
+    if (ufo._beamState === 'charging') target = 0.4;
+    else if (ufo._beamState === 'firing') target = 0.65;
+    cone._opSmooth = (cone._opSmooth ?? 0);
+    cone._opSmooth += (target - cone._opSmooth) * Math.min(1, 8 * dt);
+    cone.material.opacity = cone._opSmooth;
+    cone.visible = cone._opSmooth > 0.01;
+  }
+
+  // ---- Find closest hostile target ---------------------------------
   let target = null;
   let bestDistSq = UFO_DETECTION_RANGE * UFO_DETECTION_RANGE;
-  const pos = ufo.body.translation();
   for (const p of allPlanes) {
     if (!p.alive || p.team === ufo.team) continue;
     const tp = p.body.translation();
-    const dx = tp.x - pos.x, dy = tp.y - pos.y, dz = tp.z - pos.z;
-    const d = dx * dx + dy * dy + dz * dz;
-    if (d < bestDistSq) {
-      bestDistSq = d;
-      target = p;
-    }
+    const ddx = tp.x - newX, ddy = tp.y - newY, ddz = tp.z - newZ;
+    const d = ddx * ddx + ddy * ddy + ddz * ddz;
+    if (d < bestDistSq) { bestDistSq = d; target = p; }
   }
 
-  // Cooldown ticking + volley.
-  ufo._laserCD = Math.max(0, ufo._laserCD - dt);
-  if (target && ufo._laserCD <= 0) {
-    fireLaserVolley(ufo, target, allPlanes, scene);
-    ufo._laserCD = UFO_LASER_COOLDOWN;
+  // ---- Sustained beam state machine --------------------------------
+  ufo._beamTimer = Math.max(0, ufo._beamTimer - dt);
+  switch (ufo._beamState) {
+    case 'idle':
+      if (target) {
+        ufo._beamState = 'charging';
+        ufo._beamTimer = UFO_BEAM_CHARGE_SEC;
+        ufo._beamTarget = target;
+      }
+      break;
+    case 'charging':
+      if (!target) {
+        ufo._beamState = 'idle';
+        ufo._beamTarget = null;
+      } else if (ufo._beamTimer <= 0) {
+        ufo._beamState = 'firing';
+        ufo._beamTarget = target;
+      }
+      break;
+    case 'firing':
+      if (!target || target !== ufo._beamTarget || !ufo._beamTarget?.alive) {
+        ufo._beamState = 'recover';
+        ufo._beamTimer = UFO_BEAM_RECOVER_SEC;
+        ufo._beamTarget = null;
+      } else {
+        applyBeamDamage(ufo, ufo._beamTarget, dt);
+      }
+      break;
+    case 'recover':
+      if (ufo._beamTimer <= 0) ufo._beamState = 'idle';
+      break;
   }
 
-  // Visual beam decay.
-  for (let i = ufo._activeBeams.length - 1; i >= 0; i--) {
-    const b = ufo._activeBeams[i];
-    b.ttl -= dt;
-    b.line.material.opacity = Math.max(0, b.ttl / UFO_LASER_TTL);
-    if (b.ttl <= 0) {
-      scene.remove(b.line);
-      b.line.geometry.dispose();
-      b.line.material.dispose();
-      ufo._activeBeams.splice(i, 1);
+  // ---- Beam visual: a green line from boss to target while charging
+  //      or firing. Pulses thicker/brighter when firing.
+  const showBeam = (ufo._beamState === 'charging' || ufo._beamState === 'firing') && (ufo._beamTarget || target);
+  if (showBeam) {
+    const tgt = ufo._beamTarget || target;
+    const tp = tgt.body.translation();
+    const origin = new THREE.Vector3(newX, newY + 2, newZ);
+    const end = new THREE.Vector3(tp.x, tp.y, tp.z);
+    if (!ufo._beamLine) {
+      const geom = new THREE.BufferGeometry().setFromPoints([origin, end]);
+      const mat = new THREE.LineBasicMaterial({
+        color: UFO_GREEN, transparent: true, opacity: 1.0,
+      });
+      ufo._beamLine = new THREE.Line(geom, mat);
+      scene.add(ufo._beamLine);
+      ufo._beamLight = new THREE.PointLight(UFO_GREEN, 1.5, 80, 1.5);
+      scene.add(ufo._beamLight);
     }
+    const positions = ufo._beamLine.geometry.attributes.position.array;
+    positions[0] = origin.x; positions[1] = origin.y; positions[2] = origin.z;
+    positions[3] = end.x;    positions[4] = end.y;    positions[5] = end.z;
+    ufo._beamLine.geometry.attributes.position.needsUpdate = true;
+    const pulse = 0.7 + 0.3 * Math.sin(performance.now() * 0.04);
+    ufo._beamLine.material.opacity = ufo._beamState === 'firing' ? pulse : pulse * 0.55;
+    if (ufo._beamLight) {
+      ufo._beamLight.position.copy(origin).lerp(end, 0.5);
+      ufo._beamLight.intensity = ufo._beamState === 'firing' ? 1.5 : 0.6;
+    }
+  } else if (ufo._beamLine) {
+    scene.remove(ufo._beamLine);
+    ufo._beamLine.geometry.dispose();
+    ufo._beamLine.material.dispose();
+    ufo._beamLine = null;
+    if (ufo._beamLight) scene.remove(ufo._beamLight);
+    ufo._beamLight = null;
   }
 }
 
-/** Fire 3 lasers in a triangle (120° apart) — center direction aims at target. */
-function fireLaserVolley(ufo, target, allPlanes, scene) {
+/** Continuous DPS application — only counts when target is in range. */
+function applyBeamDamage(ufo, target, dt) {
+  if (!target || !target.alive) return;
   const pos = ufo.body.translation();
   const tp = target.body.translation();
-  // Base direction toward target on horizontal plane (XZ); add small Y tilt.
-  const baseDir = _v.set(tp.x - pos.x, 0, tp.z - pos.z).normalize();
-  const baseAngle = Math.atan2(-baseDir.x, -baseDir.z);
-
-  for (let i = 0; i < 3; i++) {
-    const angle = baseAngle + (i * (Math.PI * 2 / 3));
-    const dir = _v2.set(-Math.sin(angle), 0, -Math.cos(angle)).normalize();
-    fireSingleLaser(ufo, dir, allPlanes, scene);
-  }
-}
-
-function fireSingleLaser(ufo, dir, allPlanes, scene) {
-  const pos = ufo.body.translation();
-  const origin = new THREE.Vector3(pos.x, pos.y + 2, pos.z);
-
-  // Hit-test: closest enemy plane along the ray within range.
-  let hitDist = UFO_LASER_RANGE;
-  let hitTarget = null;
-  for (const p of allPlanes) {
-    if (!p.alive || p.team === ufo.team) continue;
-    const tp = p.body.translation();
-    const to = _v.set(tp.x - origin.x, tp.y - origin.y, tp.z - origin.z);
-    const along = to.dot(dir);
-    if (along < 0 || along > hitDist) continue;
-    const perpSq = to.lengthSq() - along * along;
-    const r = (p.stats.colliderHalf?.x ?? 1.5) + 1.0;
-    if (perpSq <= r * r) {
-      hitTarget = p;
-      hitDist = along;
-    }
-  }
-  if (hitTarget) applyDamage(hitTarget, UFO_LASER_DAMAGE, ufo);
-
-  // Visual beam.
-  const end = origin.clone().addScaledVector(dir, hitDist);
-  const geom = new THREE.BufferGeometry().setFromPoints([origin, end]);
-  const mat = new THREE.LineBasicMaterial({
-    color: UFO_GREEN, transparent: true, opacity: 1, linewidth: 2,
-  });
-  const line = new THREE.Line(geom, mat);
-  scene.add(line);
-  ufo._activeBeams.push({ line, ttl: UFO_LASER_TTL });
+  const dx = tp.x - pos.x, dy = tp.y - pos.y, dz = tp.z - pos.z;
+  const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (d > UFO_LASER_RANGE) return;
+  applyDamage(target, UFO_LASER_DPS * dt, ufo);
 }
