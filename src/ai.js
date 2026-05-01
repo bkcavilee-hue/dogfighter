@@ -203,7 +203,7 @@ export function updateAI(plane, brain, allPlanes, dt) {
   // --- Missile fire ----------------------------------------------------
   // Hold lock for missileLockDelay seconds before firing. Skip if cooldown
   // hasn't elapsed or if the AI has none left.
-  if (plane.missiles > 0 && brain.missileCD <= 0) {
+  if (brain.missileCD <= 0) {
     const missileLock = findMissileLock(plane, allPlanes);
     if (missileLock === target) {
       brain.missileLockTimer += dt;
