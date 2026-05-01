@@ -454,16 +454,12 @@ export async function startEngine() {
       refreshAllPlanes();
 
       // --- Player intent (keyboard → flight model) -----------------
-      // Star Fox controls (#4):
-      //   A/D → bank input (rolls + bank-induced turn)
-      //   Z/X → rudder (direct yaw, used for fine adjustments)
-      //   W/S → pitch
+      // Controls 1: real flight + auto-bank coordinated turn.
       const playerIntent = {
-        bank:   (input.bankL  ? 1 : 0) - (input.bankR  ? 1 : 0),
-        rudder: (input.rudderL ? 1 : 0) - (input.rudderR ? 1 : 0),
-        pitch:  (input.climb  ? 1 : 0) - (input.dive   ? 1 : 0),
-        boost:  input.boost,
-        fire:   input.fire,
+        yaw:   (input.left ? 1 : 0) - (input.right ? 1 : 0),
+        pitch: (input.climb ? 1 : 0) - (input.dive   ? 1 : 0),
+        boost: input.boost,
+        fire:  input.fire,
         loopTap:      consumeLoopTap(),
         rollLeftTap:  consumeRollLeftTap(),
         rollRightTap: consumeRollRightTap(),

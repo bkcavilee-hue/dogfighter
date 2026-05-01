@@ -147,6 +147,10 @@ export async function preloadMissileModel() {
     box.getSize(size);
     const longest = Math.max(size.x, size.y, size.z) || 1;
     root.scale.setScalar(MISSILE_TARGET_LENGTH / longest);
+    // Rotate the inner scene 90° around Y so the missile points down its
+    // forward axis (-Z) instead of sideways. (User requested 90° right.)
+    root.rotation.y = -Math.PI / 2;
+    root.updateMatrixWorld(true);
     // Center on origin so the rotated cloned mesh sits where we put it.
     const newBox = new THREE.Box3().setFromObject(root);
     const center = new THREE.Vector3();

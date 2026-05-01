@@ -149,8 +149,11 @@ export function createAircraft({
   // Afterburner cone — additive emissive geometry behind the tail. Scales
   // and fades with boost intensity each frame.
   const burner = buildAfterburner();
-  burner.position.set(0, 0, 1.6); // behind the plane (forward = -Z)
-  burner.scale.setScalar(0.001);  // hidden by default
+  // Behind the plane (+Z) AND tilted slightly down so the cone points at
+  // the engine nozzle line rather than out the spine.
+  burner.position.set(0, -0.35, 1.6);
+  burner.rotation.x = -0.18;
+  burner.scale.setScalar(0.001);
   mesh.add(burner);
 
   const body = createRigidBody(position, null, 'dynamic');
@@ -333,45 +336,26 @@ export function updateAircraft(plane, intent, dt) {
   if (plane._pitchSmoothed === undefined) plane._pitchSmoothed = 0;
   plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, 14.0 * dt);
 
-  // STAR FOX flight model:
-  //   - Bank input (A/D, smoothed) rolls the plane around its forward axis.
-  //   - The plane's bank ANGLE drives an automatic yaw: banking IS turning.
-  //   - Rudder input (Z/X) gives a direct yaw without banking, for fine
-  //     trims and to skid through aim adjustments.
-  //   - Pitch is direct (W/S).
-  const MAX_BANK = THREE.MathUtils.degToRad(70);
-  const BANK_TO_YAW_RATE = 1.2; // multiplier from sin(bank) → yaw rate
+  // CONTROLS 1: real flight + auto-bank coordinated turn.
+  //   - A/D → direct yaw input
+  //   - W/S → direct pitch input
+  //   - Yaw input also drives an automatic bank (visual roll into the turn)
+  if (plane._yawSmoothed === undefined) plane._yawSmoothed = 0;
+  const yawAxisTarget = THREE.MathUtils.clamp(intent.yaw || 0, -1, 1);
+  plane._yawSmoothed += (yawAxisTarget - plane._yawSmoothed) * Math.min(1, 14.0 * dt);
 
-  // Smoothed bank input.
-  if (plane._bankInputSmoothed === undefined) plane._bankInputSmoothed = 0;
-  const bankInputTarget = THREE.MathUtils.clamp(intent.bank || 0, -1, 1);
-  plane._bankInputSmoothed += (bankInputTarget - plane._bankInputSmoothed) * Math.min(1, 14 * dt);
+  // Auto-bank: target roll proportional to yaw input. Eases in fast,
+  // eases out slow. Applied as per-frame DELTA so accumulated body
+  // rotation stays bounded.
+  const MAX_BANK = THREE.MathUtils.degToRad(40);
+  const targetBank = -plane._yawSmoothed * MAX_BANK;
+  if (plane._bankAngle === undefined) plane._bankAngle = 0;
+  const bankLerp = Math.abs(targetBank) > Math.abs(plane._bankAngle) ? 6.0 : 2.5;
+  const newBank = plane._bankAngle + (targetBank - plane._bankAngle) * Math.min(1, bankLerp * dt);
+  const bankDelta = newBank - plane._bankAngle;
+  plane._bankAngle = newBank;
 
-  // Smoothed rudder input.
-  if (plane._rudderSmoothed === undefined) plane._rudderSmoothed = 0;
-  const rudderTarget = THREE.MathUtils.clamp(intent.rudder || 0, -1, 1);
-  plane._rudderSmoothed += (rudderTarget - plane._rudderSmoothed) * Math.min(1, 14 * dt);
-
-  // Track integrated bank angle so we can clamp it AND so bank-induced yaw
-  // can read the current bank as sin(angle).
-  if (plane._bank === undefined) plane._bank = 0;
-  const BANK_RATE = THREE.MathUtils.degToRad(s.turnRateDegPerSec) * 1.2; // bank rolls fast
-  const bankInputDelta = plane._bankInputSmoothed * BANK_RATE * dt;
-  // Auto-level: when no bank input held, decay current bank toward 0.
-  let levelDelta = 0;
-  if (Math.abs(plane._bankInputSmoothed) < 0.05 && Math.abs(plane._bank) > 0.001) {
-    levelDelta = -plane._bank * Math.min(1, 1.4 * dt);
-  }
-  const bankDelta = THREE.MathUtils.clamp(
-    plane._bank + bankInputDelta + levelDelta, -MAX_BANK, MAX_BANK,
-  ) - plane._bank;
-  plane._bank += bankDelta;
-
-  // Bank-induced yaw + rudder yaw (combined yaw delta).
-  const bankYawRate = -Math.sin(plane._bank) * BANK_TO_YAW_RATE;
-  const rudderYawRate = plane._rudderSmoothed * THREE.MathUtils.degToRad(s.turnRateDegPerSec) * 0.6;
-  const yawDelta = (bankYawRate + rudderYawRate) * dt;
-
+  const yawDelta = plane._yawSmoothed * THREE.MathUtils.degToRad(s.turnRateDegPerSec) * dt;
   let pitchDelta = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
 
   // Pitch clamp ±70°: derive current pitch from forward.y, never let the

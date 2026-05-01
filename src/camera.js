@@ -19,26 +19,20 @@ export function createCamera() {
 }
 
 export const cameraConfig = {
-  height: 4,           // meters above plane in its LOCAL frame
-  back: 18,            // meters behind plane in its LOCAL frame
-  followLerp: 0.18,
-  lookLerp: 0.22,
-  rotLerp: 0.20,       // how aggressively the camera matches plane rotation
-  lookAheadMeters: 90,
+  height: 14,          // meters above plane (world space)
+  back: 32,            // meters behind plane (world space, along horizontal heading)
+  followLerp: 0.14,
+  lookLerp: 0.20,
+  lookAheadMeters: 70,
 };
 
 let _smoothedLookAt = new THREE.Vector3();
 let _initialized = false;
 
-// Yaw-follow camera (Camera C): the camera tracks the jet's heading and
-// follows pitch SOFTLY (~40%), but never rolls. World-up is preserved so
-// the horizon stays level even when the jet banks hard.
+// Camera B: fixed world-up chase. Camera sits behind+above the plane in
+// WORLD space (not the plane's local frame). Horizon never tilts — the
+// plane visibly banks/pitches beneath the camera. Classic arcade flight.
 const _planeQ = new THREE.Quaternion();
-const _camQ = new THREE.Quaternion();
-const _yawQ = new THREE.Quaternion();
-const _pitchQ = new THREE.Quaternion();
-const _Y = new THREE.Vector3(0, 1, 0);
-const _X = new THREE.Vector3(1, 0, 0);
 const _camForward = new THREE.Vector3();
 
 export function updateChaseCamera(camera, plane) {
@@ -49,26 +43,21 @@ export function updateChaseCamera(camera, plane) {
   const t = plane.body.translation();
   _targetPos.set(t.x, t.y, t.z);
 
-  // Extract heading (yaw around world Y) from the jet's forward vector.
+  // Project the plane's forward onto the horizontal (XZ) plane — bank and
+  // pitch don't move the camera, just heading.
   _camForward.set(0, 0, -1).applyQuaternion(_planeQ);
-  const heading = Math.atan2(-_camForward.x, -_camForward.z);
-  // Extract pitch from forward.y; soft-follow at PITCH_FOLLOW.
-  const pitch = Math.asin(THREE.MathUtils.clamp(_camForward.y, -1, 1));
-  const PITCH_FOLLOW = 0.4;
+  _camForward.y = 0;
+  if (_camForward.lengthSq() < 1e-4) _camForward.set(0, 0, -1);
+  _camForward.normalize();
 
-  // Build camera orientation: yaw + softened pitch, NO roll.
-  _yawQ.setFromAxisAngle(_Y, heading);
-  _pitchQ.setFromAxisAngle(_X, pitch * PITCH_FOLLOW);
-  _camQ.copy(_yawQ).multiply(_pitchQ);
+  // World-space behind+above offset.
+  const desiredCamPos = _v.copy(_targetPos)
+    .addScaledVector(_camForward, -cameraConfig.back)
+    .add(new THREE.Vector3(0, cameraConfig.height, 0));
 
-  // Position offset in this synthetic frame: behind + above, no bank.
-  const localOffset = _camPos.set(0, cameraConfig.height, cameraConfig.back).applyQuaternion(_camQ);
-  const desiredCamPos = _v.copy(_targetPos).add(localOffset);
-
-  // Look-at point ahead of the plane along its TRUE forward — so steep
-  // dives still look like dives even if the camera pitch follow is soft.
+  // Look-at slightly ahead so the player sees what they're flying into.
   const lookAhead = _smoothedLookAt.copy(_targetPos)
-    .add(_forward.set(0, 0, -1).applyQuaternion(_planeQ).multiplyScalar(cameraConfig.lookAheadMeters));
+    .addScaledVector(_camForward, cameraConfig.lookAheadMeters);
 
   if (!_initialized) {
     camera.position.copy(desiredCamPos);
@@ -79,9 +68,7 @@ export function updateChaseCamera(camera, plane) {
     _smoothedLookAt.lerp(lookAhead, cameraConfig.lookLerp);
   }
 
-  // World-up always so the horizon stays level. lookAt builds a roll-free
-  // orientation toward the look-ahead point.
-  camera.up.set(0, 1, 0);
+  camera.up.set(0, 1, 0); // hard-locked world-up
   camera.lookAt(_smoothedLookAt);
 }
 
