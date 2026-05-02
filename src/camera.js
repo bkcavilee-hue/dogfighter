@@ -39,8 +39,17 @@ let _initialized = false;
 // Pitch and roll never move the camera. Horizon is permanently level.
 // When the jet pitches up or rolls or loops, the camera holds steady and
 // the jet visibly maneuvers in front of it.
+//
+// Anti-flip: we keep a persistent smoothed horizontal heading. When the
+// jet's nose is near vertical (live horizontal forward is degenerate),
+// we HOLD the previous heading instead of letting it snap 180°. As soon
+// as the jet pitches back near horizontal, the smoothed heading eases
+// to the new live value. This eliminates the "camera flips when looping"
+// failure mode.
 const _planeQ = new THREE.Quaternion();
-const _camForward = new THREE.Vector3();
+const _liveForward = new THREE.Vector3(0, 0, -1);
+const _smoothedHeading = new THREE.Vector3(0, 0, -1);
+const _worldUpVec = new THREE.Vector3(0, 1, 0);
 
 export function updateChaseCamera(camera, plane) {
   if (!plane) return;
@@ -50,22 +59,33 @@ export function updateChaseCamera(camera, plane) {
   const t = plane.body.translation();
   _targetPos.set(t.x, t.y, t.z);
 
-  // Project the jet's forward onto the horizontal (XZ) plane — pitch
-  // and roll don't move the camera, just heading.
-  _camForward.set(0, 0, -1).applyQuaternion(_planeQ);
-  _camForward.y = 0;
-  if (_camForward.lengthSq() < 1e-4) _camForward.set(0, 0, -1);
-  _camForward.normalize();
+  // Live horizontal forward of the jet (XZ projection).
+  _liveForward.set(0, 0, -1).applyQuaternion(_planeQ);
+  _liveForward.y = 0;
+  const horizMag2 = _liveForward.lengthSq();
+  // Only update the smoothed heading when the live one is stable. Below
+  // ~25° from vertical (sin(25°)² ≈ 0.18) the horizontal projection is
+  // too small to trust — hold the previous heading so the camera stays
+  // put while the jet pitches through the singularity.
+  if (horizMag2 > 0.18) {
+    _liveForward.normalize();
+    if (!_initialized) {
+      _smoothedHeading.copy(_liveForward);
+    } else {
+      _smoothedHeading.lerp(_liveForward, cameraConfig.followLerp);
+      _smoothedHeading.y = 0;
+      if (_smoothedHeading.lengthSq() > 1e-6) _smoothedHeading.normalize();
+    }
+  }
+  // (else: keep _smoothedHeading from last stable frame.)
 
-  // Behind along the heading + above in WORLD up. Constant offsets so
-  // the camera sits at a fixed altitude relative to the jet regardless
-  // of nose attitude.
+  // Behind along the smoothed heading + above in WORLD up.
   const desiredCamPos = _v.copy(_targetPos)
-    .addScaledVector(_camForward, -cameraConfig.back)
-    .add(new THREE.Vector3(0, cameraConfig.height, 0));
+    .addScaledVector(_smoothedHeading, -cameraConfig.back)
+    .addScaledVector(_worldUpVec, cameraConfig.height);
 
   const lookAhead = _smoothedLookAt.copy(_targetPos)
-    .addScaledVector(_camForward, cameraConfig.lookAheadMeters);
+    .addScaledVector(_smoothedHeading, cameraConfig.lookAheadMeters);
 
   if (!_initialized) {
     camera.position.copy(desiredCamPos);

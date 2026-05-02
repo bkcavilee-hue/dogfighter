@@ -57,7 +57,7 @@ export function createHUD() {
     border-radius: 6px; font-family: monospace; font-size: 12px;
     letter-spacing: 0.08em;
   `;
-  banner.textContent = '↑/↓ pitch · ←/→ turn · Space boost · W flares · E fire · Q missile · Tab cycle · Shift lock · ←×2/→×2 roll · ↑×2 loop';
+  banner.textContent = '↑ dive · ↓ climb · ←/→ turn · Space boost · W flares · E fire · Q missile · Tab cycle · Shift lock · ←×2/→×2 roll · ↓×2 loop';
   document.body.appendChild(banner);
 
   // Reticle / lock overlay (full-screen canvas)
@@ -188,8 +188,8 @@ export function createHUD() {
         cursor:pointer;font-family:inherit;
       ">LAUNCH MATCH</button>
       <div style="opacity:0.45;font-size:11px;margin-top:18px;font-family:monospace;letter-spacing:0.15em;line-height:1.6;">
-        ↑/↓ PITCH · ←/→ TURN · SPACE BOOST · W FLARES<br>
-        E FIRE · Q MISSILE · TAB CYCLE · SHIFT LOCK · ←×2/→×2 ROLL · ↑×2 LOOP
+        ↑ DIVE · ↓ CLIMB · ←/→ TURN · SPACE BOOST · W FLARES<br>
+        E FIRE · Q MISSILE · TAB CYCLE · SHIFT LOCK · ←×2/→×2 ROLL · ↓×2 LOOP
       </div>
     </div>
     <style>

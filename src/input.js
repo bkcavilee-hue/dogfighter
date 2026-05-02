@@ -41,12 +41,15 @@ function tap(maneuver) {
 
 function keyDown(code) {
   switch (code) {
+    // INVERTED PITCH: pulling back on the stick (ArrowUp) is dive in
+    // some sims, climb in others. Per user request, we now use the
+    // inverted convention — ArrowUp = nose DOWN, ArrowDown = nose UP.
     case 'ArrowUp':
-      if (!input.climb) tap('loop');
-      input.climb = true;
+      input.dive = true;
       break;
     case 'ArrowDown':
-      input.dive = true;
+      if (!input.climb) tap('loop');
+      input.climb = true;
       break;
     case 'ArrowLeft':
       if (!input.left) tap('rollL');
@@ -78,8 +81,8 @@ function keyDown(code) {
 
 function keyUp(code) {
   switch (code) {
-    case 'ArrowUp':    input.climb = false; break;
-    case 'ArrowDown':  input.dive = false; break;
+    case 'ArrowUp':    input.dive = false; break;
+    case 'ArrowDown':  input.climb = false; break;
     case 'ArrowLeft':  input.left = false; break;
     case 'ArrowRight': input.right = false; break;
     case 'Space':      input.boost = false; break;

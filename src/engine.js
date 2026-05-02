@@ -189,20 +189,22 @@ export async function startEngine() {
   // Host-owned AI bots (MP only). Each has { plane, brain, weapon }.
   const bots = [];
 
-  // UFO boss enemy — solo only AND only on maps where the boss belongs.
+  // UFO boss enemy — spawned in ALL modes (solo + MP) on maps that
+  // declare hasUfoBoss. Position is in front of the player's spawn
+  // (player faces -Z from z=800) so it's visible immediately.
   let ufoBoss = null;
-  if (!isMultiplayer && mapCfg.hasUfoBoss) {
+  if (mapCfg.hasUfoBoss) {
     ufoBoss = createUfoBoss({
       scene,
-      position: new THREE.Vector3(0, 500, 0),
+      position: new THREE.Vector3(0, 480, 200),
       getMeshFn: getUfoMesh,
     });
   }
 
-  // UFO2 drones — three orbiting around the boss area on the desert map.
+  // UFO2 drones — three orbiting around the UFO boss area.
   let drones = [];
   let mines = [];
-  if (!isMultiplayer && mapCfg.hasUfoDrones) {
+  if (mapCfg.hasUfoDrones) {
     drones = createDrones({ scene, getMeshFn: getUfo2Mesh });
   }
 
@@ -216,10 +218,11 @@ export async function startEngine() {
       for (const b of bots) allPlanes.push(b.plane);
     } else {
       for (const e of enemies) allPlanes.push(e);
-      if (ufoBoss && ufoBoss.alive) allPlanes.push(ufoBoss);
-      for (const d of drones) if (d.alive) allPlanes.push(d);
-      for (const m of mines)  if (m.alive) allPlanes.push(m);
     }
+    // UFOs are local-simulated in every mode, so include them regardless.
+    if (ufoBoss && ufoBoss.alive) allPlanes.push(ufoBoss);
+    for (const d of drones) if (d.alive) allPlanes.push(d);
+    for (const m of mines)  if (m.alive) allPlanes.push(m);
   }
   refreshAllPlanes();
 
@@ -714,6 +717,10 @@ export async function startEngine() {
         spawnDeathTumble(scene, p);
       }
       p._wasAlive = p.alive;
+
+      // Defensive: a UFO/drone/mine that died THIS tick has its mesh
+      // cleared by its update fn before allPlanes is rebuilt. Skip those.
+      if (!p.mesh) continue;
 
       syncMesh(p.mesh, p.body);
       if (p._maneuver) {

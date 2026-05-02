@@ -80,7 +80,7 @@ export function createUfoBoss({ scene, position, getMeshFn = null }) {
   scene.add(mesh);
 
   // Add a brighter green point light so it's visible from far away.
-  const halo = new THREE.PointLight(UFO_GREEN, 1.5, 200, 1.4);
+  const halo = new THREE.PointLight(UFO_GREEN, 4.0, 600, 1.2);
   halo.position.copy(position).y += 4;
   scene.add(halo);
 

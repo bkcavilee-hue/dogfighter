@@ -28,14 +28,15 @@ const MISSILE_PATH = '/assets/models/missile.glb';
 const MISSILE_TARGET_LENGTH = 1.4;
 let _missilePrototype = null;
 
-// UFO boss mesh — large, single prototype.
+// UFO boss mesh — large, single prototype. Scaled UP from 14 to 24m so
+// the boss is spottable from the spawn altitude across the arena.
 const UFO_PATH = '/assets/models/ufo.glb';
-const UFO_TARGET_LENGTH = 14;
+const UFO_TARGET_LENGTH = 24;
 let _ufoPrototype = null;
 
-// UFO2 drone mesh — smaller saucer.
+// UFO2 drone mesh — bumped from 5.5 to 8m for the same reason.
 const UFO2_PATH = '/assets/models/ufo2.glb';
-const UFO2_TARGET_LENGTH = 5.5;
+const UFO2_TARGET_LENGTH = 8;
 let _ufo2Prototype = null;
 
 // Per-model orientation correction. Start with 180° flip (assuming the
@@ -76,15 +77,16 @@ export const MAPS = {
     paths: {
       island: '/assets/maps/mountains.glb',
     },
-    // mountains.glb is ~5.5x taller than the desert island. Cap visual
-    // height so peaks don't pierce the playable ceiling (1200m). The fit
-    // logic uses min(horizontalScale, verticalScale) when maxHeight is set.
+    // 2× wider than before per request (2800 → 5600 horizontal). Vertical
+    // cap also doubled (900 → 1800) so mountain proportions feel right;
+    // playable ceiling raised on this map to give planes room above the
+    // peaks (see ARENA.maxAltitude override in engine).
     fit: {
-      island: { length: 2800, lift: 0, maxHeight: 900 },
+      island: { length: 5600, lift: 0, maxHeight: 1800 },
     },
     hasOcean: false,
-    hasUfoBoss: false,
-    hasUfoDrones: false,
+    hasUfoBoss: true,
+    hasUfoDrones: true,
   },
 };
 let activeMapId = 'desert';
