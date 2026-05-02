@@ -19,14 +19,16 @@ export function createCamera() {
 }
 
 export const cameraConfig = {
-  height: 14,          // meters above plane (world space)
-  back: 32,            // meters behind plane (world space, along horizontal heading)
+  height: 9,           // meters above plane (in plane's local up)
+  back: 26,            // meters behind plane (along plane's local forward)
   // Higher lerps = camera tracks heading changes more aggressively, so
   // the view actively follows where the jet is pointed instead of lagging
   // behind during turns.
   followLerp: 0.32,
   lookLerp: 0.40,
-  lookAheadMeters: 70,
+  // Look closer to the plane (was 70) so the jet is centered on screen
+  // rather than dropped to the bottom of the frame by the look-ahead.
+  lookAheadMeters: 18,
 };
 
 let _smoothedLookAt = new THREE.Vector3();

@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { applyDamage } from './gamestate.js';
 import { getArenaModel } from './models.js';
+import { attachHpBar } from './enemy-hpbar.js';
 
 const UFO_TEAM = 'ufo';
 const UFO_HP = 700;                  // ~10× interceptor
@@ -83,6 +84,13 @@ export function createUfoBoss({ scene, position, getMeshFn = null }) {
   halo.position.copy(position).y += 4;
   scene.add(halo);
 
+  // Damage indicator that floats above the UFO. Shown after first hit.
+  const hpBar = attachHpBar(mesh, { width: 28, height: 2.0, yOffset: 22 });
+
+  // Boot-time verification log — confirms the GLB loaded vs fallback.
+  const usedGlb = !!(getMeshFn && getMeshFn !== null && mesh.children.some((c) => c.isGroup || c.children?.length));
+  console.log(`[ufo] boss spawned at (${position.x.toFixed(0)},${position.y.toFixed(0)},${position.z.toFixed(0)}) using ${usedGlb ? 'GLB' : 'fallback geometry'}`);
+
   return {
     id: 'ufo-boss',
     name: 'UFO',
@@ -106,6 +114,7 @@ export function createUfoBoss({ scene, position, getMeshFn = null }) {
     heat: 0,
     mesh,
     halo,
+    hpBar,
     stats: {
       colliderHalf: { x: UFO_RADIUS, y: 4, z: UFO_RADIUS },
       maxHP: UFO_HP,
@@ -146,9 +155,10 @@ function makeStaticBody(position) {
 }
 
 /** Per-frame tick: drift / spin / bob, then sustained beam state machine. */
-export function updateUfoBoss(ufo, allPlanes, scene, dt) {
+export function updateUfoBoss(ufo, allPlanes, scene, dt, camera = null) {
   if (!ufo.alive) {
     if (ufo.HP <= 0 && ufo.mesh && ufo.mesh.parent) {
+      if (ufo.hpBar) ufo.hpBar.dispose();
       scene.remove(ufo.mesh);
       if (ufo.halo) scene.remove(ufo.halo);
       if (ufo._beamLine) scene.remove(ufo._beamLine);
@@ -157,6 +167,8 @@ export function updateUfoBoss(ufo, allPlanes, scene, dt) {
     }
     return;
   }
+
+  if (ufo.hpBar && camera) ufo.hpBar.update(camera, ufo.HP, ufo.maxHP);
 
   // ---- Motion: drift + bob + multi-axis spin ----------------------
   ufo._driftTimer -= dt;

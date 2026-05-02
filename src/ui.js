@@ -57,7 +57,7 @@ export function createHUD() {
     border-radius: 6px; font-family: monospace; font-size: 12px;
     letter-spacing: 0.08em;
   `;
-  banner.textContent = 'W/S pitch · A/D bank-to-turn · Z/X rudder · Space boost · E fire · Q missile · Tab cycle · Shift lock · A×2/D×2 dodge · S×2 flares';
+  banner.textContent = '↑/↓ pitch · ←/→ turn · Space boost · W flares · E fire · Q missile · Tab cycle · Shift lock · ←×2/→×2 roll · ↑×2 loop';
   document.body.appendChild(banner);
 
   // Reticle / lock overlay (full-screen canvas)

@@ -6,6 +6,12 @@ import * as THREE from 'three';
 import { RAPIER, createRigidBody, createCollider } from './physics.js';
 import { getPlaneMesh } from './models.js';
 
+// Player jets are buffed across the board — faster top speed, faster
+// boost, snappier turn rates — so the human always has the edge over
+// AI flying the same airframe class.
+export const PLAYER_SPEED_MUL = 1.30;
+export const PLAYER_TURN_MUL = 1.20;
+
 /** Stat presets per plane class — direct from the design doc. */
 export const PLANE_STATS = {
   interceptor: {
@@ -259,7 +265,9 @@ export function updateAircraft(plane, intent, dt) {
   } else {
     plane.boost = Math.min(s.maxBoost, plane.boost + s.boostRegenPerSec * dt);
   }
-  const speed = plane.boostActive ? s.boostSpeed : s.maxSpeed;
+  const speedMul = plane.isPlayer ? PLAYER_SPEED_MUL : 1.0;
+  const turnMul  = plane.isPlayer ? PLAYER_TURN_MUL  : 1.0;
+  const speed = (plane.boostActive ? s.boostSpeed : s.maxSpeed) * speedMul;
 
   // --- Cooldowns ------------------------------------------------------
   if (plane._maneuverCD > 0) plane._maneuverCD -= dt;
@@ -338,8 +346,8 @@ export function updateAircraft(plane, intent, dt) {
   const yawAxisTarget = THREE.MathUtils.clamp(intent.yaw || 0, -1, 1);
   plane._yawSmoothed += (yawAxisTarget - plane._yawSmoothed) * Math.min(1, 14.0 * dt);
 
-  const yawDelta   = plane._yawSmoothed   * THREE.MathUtils.degToRad(s.turnRateDegPerSec)  * dt;
-  const pitchDelta = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
+  const yawDelta   = plane._yawSmoothed   * THREE.MathUtils.degToRad(s.turnRateDegPerSec  * turnMul) * dt;
+  const pitchDelta = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec * turnMul) * dt;
 
   // Apply pitch then yaw as local-frame deltas. Because we never apply a
   // roll delta and the body's roll is reset to 0 below, the jet always

@@ -4,6 +4,7 @@
 // another. Mines damage the player on contact and have their own HP.
 import * as THREE from 'three';
 import { applyDamage } from './gamestate.js';
+import { attachHpBar } from './enemy-hpbar.js';
 
 const DRONE_TEAM = 'ufo';
 const DRONE_HP = 60;
@@ -40,6 +41,9 @@ export function createDrones({ scene, getMeshFn = null }) {
     const z = Math.sin(angle) * DRONE_ORBIT_RADIUS;
     drones.push(createDrone({ scene, getMeshFn, position: new THREE.Vector3(x, DRONE_HEIGHT, z), orbitPhase: angle, index: i }));
   }
+  // Verify all 3 drones spawned with their meshes attached to the scene.
+  const usedGlb = !!getMeshFn && drones.every((d) => d.mesh && d.mesh.children.length > 0);
+  console.log(`[ufo] ${drones.length} drone(s) spawned using ${usedGlb ? 'GLB' : 'fallback geometry'}`);
   return drones;
 }
 
@@ -72,6 +76,9 @@ function createDrone({ scene, getMeshFn, position, orbitPhase, index }) {
   halo.position.copy(position);
   scene.add(halo);
 
+  // Drone damage indicator — smaller bar than the boss.
+  const hpBar = attachHpBar(mesh, { width: 8, height: 0.7, yOffset: 5 });
+
   return {
     id: `drone-${index}`,
     name: `DRONE-${index + 1}`,
@@ -87,7 +94,7 @@ function createDrone({ scene, getMeshFn, position, orbitPhase, index }) {
     flares: 0, maxFlares: 0,
     missileCD: 0, missileReloadSec: 99,
     boost: 0, maxBoost: 0, heat: 0,
-    mesh, halo,
+    mesh, halo, hpBar,
     stats: { colliderHalf: { x: DRONE_RADIUS, y: DRONE_RADIUS, z: DRONE_RADIUS }, maxHP: DRONE_HP, missiles: 0 },
     body: makeOrbitBody(position),
     orbitPhase,
@@ -126,16 +133,18 @@ function makeOrbitBody(position) {
 }
 
 /* Per-frame: orbit, fire laser, manage mine. */
-export function updateDrones(drones, mines, allPlanes, scene, dt) {
+export function updateDrones(drones, mines, allPlanes, scene, dt, camera = null) {
   for (const d of drones) {
     if (!d.alive) {
       if (d.HP <= 0 && d.mesh && d.mesh.parent) {
+        if (d.hpBar) d.hpBar.dispose();
         scene.remove(d.mesh);
         if (d.halo) scene.remove(d.halo);
         d.mesh = null;
       }
       continue;
     }
+    if (d.hpBar && camera) d.hpBar.update(camera, d.HP, d.maxHP);
 
     // Orbit + vertical bob.
     d.orbitPhase += DRONE_ORBIT_SPEED * dt;

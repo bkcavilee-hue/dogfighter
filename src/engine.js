@@ -682,8 +682,8 @@ export async function startEngine() {
       for (const m of ghosts) if (m.alive) missiles.push(m);
 
       // UFO boss + drones + mines (solo only).
-      if (ufoBoss) updateUfoBoss(ufoBoss, allPlanes, scene, FIXED_DT);
-      if (drones.length) updateDrones(drones, mines, allPlanes, scene, FIXED_DT);
+      if (ufoBoss) updateUfoBoss(ufoBoss, allPlanes, scene, FIXED_DT, camera);
+      if (drones.length) updateDrones(drones, mines, allPlanes, scene, FIXED_DT, camera);
       if (mines.length)  updateMines(mines, allPlanes, scene, FIXED_DT);
 
       updateFlares(flares, scene, FIXED_DT);
