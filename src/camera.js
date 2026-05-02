@@ -34,22 +34,30 @@ export const cameraConfig = {
 let _smoothedLookAt = new THREE.Vector3();
 let _initialized = false;
 
-// Fixed world-up chase. The camera sits behind+above the jet in WORLD
-// space, following only the jet's HORIZONTAL heading (compass direction).
-// Pitch and roll never move the camera. Horizon is permanently level.
-// When the jet pitches up or rolls or loops, the camera holds steady and
-// the jet visibly maneuvers in front of it.
+// Horizon-locked boosted-follow chase camera.
 //
-// Anti-flip: we keep a persistent smoothed horizontal heading. When the
-// jet's nose is near vertical (live horizontal forward is degenerate),
-// we HOLD the previous heading instead of letting it snap 180°. As soon
-// as the jet pitches back near horizontal, the smoothed heading eases
-// to the new live value. This eliminates the "camera flips when looping"
-// failure mode.
+//   • Camera forward = blend of (jet's local forward) and (velocity dir),
+//     so the camera leads slightly toward where the jet is actually going
+//     rather than only where its nose points.
+//   • Pitch tilt is allowed but CLAMPED to ±MAX_PITCH (default 45°) so a
+//     loop or vertical climb can never invert the camera.
+//   • Camera's up is hard-locked to world up — horizon stays level
+//     forever, no roll.
+//   • Heading (yaw) is smoothed; if the jet's nose passes through near-
+//     vertical and the horizontal projection becomes tiny, we HOLD the
+//     previous heading so the camera doesn't snap 180°.
 const _planeQ = new THREE.Quaternion();
-const _liveForward = new THREE.Vector3(0, 0, -1);
-const _smoothedHeading = new THREE.Vector3(0, 0, -1);
+const _localFwd = new THREE.Vector3(0, 0, -1);
+const _velDir = new THREE.Vector3(0, 0, -1);
+const _blendDir = new THREE.Vector3(0, 0, -1);
+const _smoothedHeading = new THREE.Vector3(0, 0, -1);   // unit, in XZ plane
+const _camForward = new THREE.Vector3(0, 0, -1);        // final, with clamped pitch
 const _worldUpVec = new THREE.Vector3(0, 1, 0);
+
+const VEL_BLEND = 0.30;                                   // 0 = nose only, 1 = velocity only
+const MAX_PITCH = Math.PI / 4;                            // ±45°
+const PITCH_FOLLOW_GAIN = 0.55;                           // 0 = no pitch tilt, 1 = full
+let _smoothedPitch = 0;
 
 export function updateChaseCamera(camera, plane) {
   if (!plane) return;
@@ -59,33 +67,71 @@ export function updateChaseCamera(camera, plane) {
   const t = plane.body.translation();
   _targetPos.set(t.x, t.y, t.z);
 
-  // Live horizontal forward of the jet (XZ projection).
-  _liveForward.set(0, 0, -1).applyQuaternion(_planeQ);
-  _liveForward.y = 0;
-  const horizMag2 = _liveForward.lengthSq();
-  // Only update the smoothed heading when the live one is stable. Below
-  // ~25° from vertical (sin(25°)² ≈ 0.18) the horizontal projection is
-  // too small to trust — hold the previous heading so the camera stays
-  // put while the jet pitches through the singularity.
+  // Jet's local forward (full 3D — includes pitch).
+  _localFwd.set(0, 0, -1).applyQuaternion(_planeQ);
+
+  // Velocity direction — only meaningful at non-trivial speed.
+  const v = plane.body.linvel();
+  _velDir.set(v.x, v.y, v.z);
+  if (_velDir.lengthSq() > 1) _velDir.normalize();
+  else _velDir.copy(_localFwd);
+
+  // Blended camera-look direction (slightly biased toward where the jet
+  // is actually moving, not just where the nose points).
+  _blendDir.copy(_localFwd).multiplyScalar(1 - VEL_BLEND)
+    .addScaledVector(_velDir, VEL_BLEND);
+  if (_blendDir.lengthSq() < 1e-6) _blendDir.copy(_localFwd);
+  else _blendDir.normalize();
+
+  // ----- HEADING (yaw) on the XZ plane -----------------------------------
+  // Project blendDir onto XZ. If the projection is too small (jet nose
+  // near vertical), HOLD the previous heading to prevent snap.
+  const horizX = _blendDir.x, horizZ = _blendDir.z;
+  const horizMag2 = horizX * horizX + horizZ * horizZ;
   if (horizMag2 > 0.18) {
-    _liveForward.normalize();
+    const inv = 1 / Math.sqrt(horizMag2);
+    const hx = horizX * inv, hz = horizZ * inv;
     if (!_initialized) {
-      _smoothedHeading.copy(_liveForward);
+      _smoothedHeading.set(hx, 0, hz);
     } else {
-      _smoothedHeading.lerp(_liveForward, cameraConfig.followLerp);
+      _smoothedHeading.x += (hx - _smoothedHeading.x) * cameraConfig.followLerp;
+      _smoothedHeading.z += (hz - _smoothedHeading.z) * cameraConfig.followLerp;
       _smoothedHeading.y = 0;
-      if (_smoothedHeading.lengthSq() > 1e-6) _smoothedHeading.normalize();
+      const m2 = _smoothedHeading.lengthSq();
+      if (m2 > 1e-6) _smoothedHeading.multiplyScalar(1 / Math.sqrt(m2));
     }
   }
-  // (else: keep _smoothedHeading from last stable frame.)
+  // (else: keep _smoothedHeading from previous frame.)
 
-  // Behind along the smoothed heading + above in WORLD up.
+  // ----- PITCH (clamped) -------------------------------------------------
+  // Raw pitch derived from blend direction's Y component, scaled by
+  // PITCH_FOLLOW_GAIN so the camera tilts less than the jet does.
+  const rawPitch = Math.asin(THREE.MathUtils.clamp(_blendDir.y, -1, 1));
+  const targetPitch = THREE.MathUtils.clamp(
+    rawPitch * PITCH_FOLLOW_GAIN,
+    -MAX_PITCH, MAX_PITCH,
+  );
+  _smoothedPitch += (targetPitch - _smoothedPitch) * cameraConfig.lookLerp;
+
+  // Reconstruct the final camera-look direction from smoothed heading
+  // (XZ unit) lifted by the smoothed pitch about the world-horizontal.
+  const cosP = Math.cos(_smoothedPitch);
+  const sinP = Math.sin(_smoothedPitch);
+  _camForward.set(
+    _smoothedHeading.x * cosP,
+    sinP,
+    _smoothedHeading.z * cosP,
+  );
+
+  // ----- POSITION & LOOK-AT ---------------------------------------------
+  // Camera sits BEHIND the look direction and above in WORLD up (so the
+  // horizon stays flat regardless of pitch).
   const desiredCamPos = _v.copy(_targetPos)
-    .addScaledVector(_smoothedHeading, -cameraConfig.back)
+    .addScaledVector(_camForward, -cameraConfig.back)
     .addScaledVector(_worldUpVec, cameraConfig.height);
 
   const lookAhead = _smoothedLookAt.copy(_targetPos)
-    .addScaledVector(_smoothedHeading, cameraConfig.lookAheadMeters);
+    .addScaledVector(_camForward, cameraConfig.lookAheadMeters);
 
   if (!_initialized) {
     camera.position.copy(desiredCamPos);
@@ -96,7 +142,7 @@ export function updateChaseCamera(camera, plane) {
     _smoothedLookAt.lerp(lookAhead, cameraConfig.lookLerp);
   }
 
-  camera.up.set(0, 1, 0); // hard-locked world-up — horizon never tilts
+  camera.up.set(0, 1, 0);   // hard-locked world-up — horizon never tilts
   camera.lookAt(_smoothedLookAt);
 }
 
