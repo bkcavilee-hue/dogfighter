@@ -72,22 +72,6 @@ export const MAPS = {
     hasUfoBoss: true,
     hasUfoDrones: true,
   },
-  mountains: {
-    label: 'Mountains',
-    paths: {
-      island: '/assets/maps/mountains.glb',
-    },
-    // 2× wider than before per request (2800 → 5600 horizontal). Vertical
-    // cap also doubled (900 → 1800) so mountain proportions feel right;
-    // playable ceiling raised on this map to give planes room above the
-    // peaks (see ARENA.maxAltitude override in engine).
-    fit: {
-      island: { length: 5600, lift: 0, maxHeight: 1800 },
-    },
-    hasOcean: false,
-    hasUfoBoss: true,
-    hasUfoDrones: true,
-  },
 };
 let activeMapId = 'desert';
 export function setActiveMap(id) {

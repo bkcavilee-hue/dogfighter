@@ -150,7 +150,7 @@ export async function startEngine() {
       heightmap.data.set(baked.data);
     }
   }
-  // Ocean is now per-map (desert + mountains both omit it). Hide procedural
+  // Ocean is per-map (desert omits it). Hide the procedural
   // shader plane regardless; only add the GLB ocean if the map declares it.
   ocean.mesh.visible = false;
   if (mapCfg.hasOcean) {

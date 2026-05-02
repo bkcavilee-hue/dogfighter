@@ -1,6 +1,5 @@
-// UFO boss enemy. One spawns at the center of the arena; rotates slowly
-// in place; periodically fires three green lasers in a 120°-spaced
-// triangle aimed at the closest player.
+// UFO boss enemy. Drifts around the arena, fires a sustained green beam
+// at the closest player. Tractor-beam cone removed per request.
 //
 // The boss exposes a "plane-like" surface (id, body{translation,rotation,
 // linvel}, mesh, HP, alive, team, stats.colliderHalf) so existing helpers
@@ -8,7 +7,6 @@
 // without modification.
 import * as THREE from 'three';
 import { applyDamage } from './gamestate.js';
-import { getArenaModel } from './models.js';
 import { attachHpBar } from './enemy-hpbar.js';
 
 const UFO_TEAM = 'ufo';
@@ -22,20 +20,25 @@ const UFO_GREEN = 0x44ff77;
 const UFO_DETECTION_RANGE = 1400;
 const UFO_DRIFT_SPEED = 6;           // m/s drift between waypoints
 const UFO_DRIFT_RADIUS = 200;        // wander region around origin
+const UFO_SPAWN_Y = 480;             // matches engine.js spawn position
 
-const _v = new THREE.Vector3();
-const _v2 = new THREE.Vector3();
-const _q = new THREE.Quaternion();
-
-/** Build the visible UFO mesh. Uses the loaded GLB if available, falls back
- *  to a simple disc + ring otherwise. Tints everything green. */
+/** Build the visible UFO mesh.
+ *
+ *  Two-layer scene graph — outer Group (`root`) holds the spinning saucer
+ *  AND the HP bar as siblings. The saucer (`spinner`) is the only thing
+ *  that gets the multi-axis spin each frame; the HP bar stays world-up
+ *  level so it reads as a damage indicator.
+ *
+ *  Returns { root, spinner, usedGlb } so the caller can attach the HP
+ *  bar to root (not spinner) and drive spin on spinner.rotation each tick.
+ */
 function buildMesh(getMeshFn) {
-  let mesh = getMeshFn ? getMeshFn() : null;
+  const root = new THREE.Group();
+  let spinner = getMeshFn ? getMeshFn() : null;
   let usedGlb = false;
-  if (mesh) {
+  if (spinner) {
     usedGlb = true;
-    // Tint all sub-materials green by overriding emissive on every mesh.
-    mesh.traverse((o) => {
+    spinner.traverse((o) => {
       if (o.isMesh && o.material) {
         const mats = Array.isArray(o.material) ? o.material : [o.material];
         for (const m of mats) {
@@ -45,11 +48,10 @@ function buildMesh(getMeshFn) {
         }
       }
     });
-    // NOTE: do NOT add a scale multiplier here. The preload step in
-    // models.js already scaled the GLB to UFO_TARGET_LENGTH (24m).
+    // NOTE: don't add a scale multiplier — preload in models.js already
+    // scaled the GLB to UFO_TARGET_LENGTH (24m).
   } else {
-    mesh = new THREE.Group();
-    // Fallback geometry sized to roughly match UFO_TARGET_LENGTH (24m wide).
+    spinner = new THREE.Group();
     const disc = new THREE.Mesh(
       new THREE.CylinderGeometry(10, 12, 2.5, 24),
       new THREE.MeshStandardMaterial({ color: 0x88ffaa, emissive: UFO_GREEN, emissiveIntensity: 0.9, metalness: 0.5, roughness: 0.4 }),
@@ -59,42 +61,28 @@ function buildMesh(getMeshFn) {
       new THREE.MeshStandardMaterial({ color: 0xaaffcc, emissive: UFO_GREEN, emissiveIntensity: 0.6, transparent: true, opacity: 0.75 }),
     );
     dome.position.y = 1.5;
-    mesh.add(disc, dome);
+    spinner.add(disc, dome);
   }
-  mesh.userData.usedGlb = usedGlb;
-  // Tractor-beam cone — sized for a 24m UFO. Was 8m × 50m back when the
-  // UFO mesh was double-scaled; now the cone lives in the UFO's actual
-  // local frame, so we keep it modest so it doesn't dominate the view.
-  const cone = new THREE.Mesh(
-    new THREE.ConeGeometry(5, 28, 18, 1, true),
-    new THREE.MeshBasicMaterial({
-      color: UFO_GREEN, transparent: true, opacity: 0.0,
-      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
-    }),
-  );
-  cone.rotation.x = Math.PI; // tip points down
-  cone.position.y = -16;     // hangs below the saucer
-  cone.userData.isTractor = true;
-  mesh.add(cone);
-  return mesh;
+  root.add(spinner);
+  root.userData.usedGlb = usedGlb;
+  return { root, spinner, usedGlb };
 }
 
 /** Create a UFO boss entity. */
 export function createUfoBoss({ scene, position, getMeshFn = null }) {
-  const mesh = buildMesh(getMeshFn);
-  mesh.position.copy(position);
-  scene.add(mesh);
+  const { root, spinner, usedGlb } = buildMesh(getMeshFn);
+  root.position.copy(position);
+  scene.add(root);
 
-  // Add a brighter green point light so it's visible from far away.
+  // Bright green halo light — visible from far away.
   const halo = new THREE.PointLight(UFO_GREEN, 4.0, 600, 1.2);
   halo.position.copy(position).y += 4;
   scene.add(halo);
 
-  // Damage indicator that floats above the UFO. Shown after first hit.
-  const hpBar = attachHpBar(mesh, { width: 28, height: 2.0, yOffset: 22 });
+  // HP bar attached to ROOT (not spinner) so it doesn't tumble with
+  // the saucer's spin. Hidden until first damage.
+  const hpBar = attachHpBar(root, { width: 28, height: 2.0, yOffset: 22 });
 
-  // Boot-time verification log — confirms the GLB loaded vs fallback.
-  const usedGlb = !!mesh.userData.usedGlb;
   console.log(`[ufo] boss spawned at (${position.x.toFixed(0)},${position.y.toFixed(0)},${position.z.toFixed(0)}) using ${usedGlb ? 'GLB' : 'fallback geometry'}`);
 
   return {
@@ -118,7 +106,10 @@ export function createUfoBoss({ scene, position, getMeshFn = null }) {
     boost: 0,
     maxBoost: 0,
     heat: 0,
-    mesh,
+    // `mesh` is the root group — engine.js syncMesh treats it like a
+    // plane mesh, so position sync goes through the parent transform.
+    mesh: root,
+    spinner,
     halo,
     hpBar,
     stats: {
@@ -129,13 +120,13 @@ export function createUfoBoss({ scene, position, getMeshFn = null }) {
     body: makeStaticBody(position),
     color: UFO_GREEN,
     // Sustained beam state.
-    _beamState: 'idle',             // 'idle' | 'charging' | 'firing' | 'recover'
+    _beamState: 'idle',
     _beamTimer: 0,
     _beamTarget: null,
     _beamLine: null,
     _beamLight: null,
     // Motion state.
-    _spinX: Math.random() * 0.4 + 0.1,   // rad/s
+    _spinX: Math.random() * 0.4 + 0.1,
     _spinY: Math.random() * 0.6 + 0.4,
     _spinZ: Math.random() * 0.3 + 0.1,
     _bobPhase: Math.random() * Math.PI * 2,
@@ -163,12 +154,23 @@ function makeStaticBody(position) {
 /** Per-frame tick: drift / spin / bob, then sustained beam state machine. */
 export function updateUfoBoss(ufo, allPlanes, scene, dt, camera = null) {
   if (!ufo.alive) {
-    if (ufo.HP <= 0 && ufo.mesh && ufo.mesh.parent) {
+    // Cleanup runs whenever the UFO is no longer alive — no longer
+    // gated on HP <= 0 (mesh would have leaked if alive flipped some
+    // other way).
+    if (ufo.mesh && ufo.mesh.parent) {
       if (ufo.hpBar) ufo.hpBar.dispose();
       scene.remove(ufo.mesh);
       if (ufo.halo) scene.remove(ufo.halo);
-      if (ufo._beamLine) scene.remove(ufo._beamLine);
-      if (ufo._beamLight) scene.remove(ufo._beamLight);
+      if (ufo._beamLine) {
+        scene.remove(ufo._beamLine);
+        ufo._beamLine.geometry.dispose();
+        ufo._beamLine.material.dispose();
+        ufo._beamLine = null;
+      }
+      if (ufo._beamLight) {
+        scene.remove(ufo._beamLight);
+        ufo._beamLight = null;
+      }
       ufo.mesh = null;
     }
     return;
@@ -176,13 +178,15 @@ export function updateUfoBoss(ufo, allPlanes, scene, dt, camera = null) {
 
   if (ufo.hpBar && camera) ufo.hpBar.update(camera, ufo.HP, ufo.maxHP);
 
-  // ---- Motion: drift + bob + multi-axis spin ----------------------
+  // ---- Motion: drift + bob ----------------------------------------
   ufo._driftTimer -= dt;
   if (ufo._driftTimer <= 0) {
     const r = UFO_DRIFT_RADIUS;
+    // Drift target altitude stays near the spawn altitude rather than
+    // dropping to the old hard-coded 350m floor.
     ufo._driftTarget.set(
       (Math.random() - 0.5) * 2 * r,
-      350 + (Math.random() - 0.5) * 80,
+      UFO_SPAWN_Y + (Math.random() - 0.5) * 80,
       (Math.random() - 0.5) * 2 * r,
     );
     ufo._driftTimer = 6 + Math.random() * 4;
@@ -202,21 +206,12 @@ export function updateUfoBoss(ufo, allPlanes, scene, dt, camera = null) {
   ufo.mesh.position.set(newX, newY, newZ);
   if (ufo.halo) ufo.halo.position.set(newX, newY + 4, newZ);
 
-  // Multi-axis spin
-  ufo.mesh.rotation.y += ufo._spinY * dt;
-  ufo.mesh.rotation.x += ufo._spinX * dt * 0.4;
-  ufo.mesh.rotation.z += ufo._spinZ * dt * 0.3;
-
-  // Tractor cone visibility — pulses when charging, holds bright when firing.
-  const cone = ufo.mesh.children.find((c) => c.userData?.isTractor);
-  if (cone) {
-    let target = 0;
-    if (ufo._beamState === 'charging') target = 0.4;
-    else if (ufo._beamState === 'firing') target = 0.65;
-    cone._opSmooth = (cone._opSmooth ?? 0);
-    cone._opSmooth += (target - cone._opSmooth) * Math.min(1, 8 * dt);
-    cone.material.opacity = cone._opSmooth;
-    cone.visible = cone._opSmooth > 0.01;
+  // Multi-axis spin — only on the SPINNER child group, never the root.
+  // Keeps the HP bar (sibling of spinner) world-up level.
+  if (ufo.spinner) {
+    ufo.spinner.rotation.y += ufo._spinY * dt;
+    ufo.spinner.rotation.x += ufo._spinX * dt * 0.4;
+    ufo.spinner.rotation.z += ufo._spinZ * dt * 0.3;
   }
 
   // ---- Find closest hostile target ---------------------------------
@@ -249,15 +244,27 @@ export function updateUfoBoss(ufo, allPlanes, scene, dt, camera = null) {
         ufo._beamTarget = target;
       }
       break;
-    case 'firing':
-      if (!target || target !== ufo._beamTarget || !ufo._beamTarget?.alive) {
+    case 'firing': {
+      // FIX: drop to recover when target dies, switches identity, OR
+      // moves beyond laser range. Previously the beam stayed visually
+      // attached to a fleeing target while doing zero damage.
+      const tgt = ufo._beamTarget;
+      const lost = !target || target !== tgt || !tgt?.alive;
+      let outOfRange = false;
+      if (!lost && tgt) {
+        const tp = tgt.body.translation();
+        const rx = tp.x - newX, ry = tp.y - newY, rz = tp.z - newZ;
+        outOfRange = (rx * rx + ry * ry + rz * rz) > UFO_LASER_RANGE * UFO_LASER_RANGE;
+      }
+      if (lost || outOfRange) {
         ufo._beamState = 'recover';
         ufo._beamTimer = UFO_BEAM_RECOVER_SEC;
         ufo._beamTarget = null;
       } else {
-        applyBeamDamage(ufo, ufo._beamTarget, dt);
+        applyBeamDamage(ufo, tgt, dt);
       }
       break;
+    }
     case 'recover':
       if (ufo._beamTimer <= 0) ufo._beamState = 'idle';
       break;
