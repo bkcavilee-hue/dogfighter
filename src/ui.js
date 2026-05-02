@@ -557,8 +557,8 @@ export function showClassSelect(classes, network = null) {
         return;
       }
       if (!network.isHost()) return; // disabled state already prevents this, but be safe
-      // Broadcast countdown to everyone in the room (including ourselves via
-      // the listener path; the host also runs the countdown locally below).
+      // Server uses socket.to(room).emit() which excludes the sender, so
+      // the host runs its own countdown locally and broadcasts to others.
       network.sendEvent({ type: 'match-start', seconds: 3 });
       overlay.style.display = 'none';
       runCountdown(3, finishLaunch);
