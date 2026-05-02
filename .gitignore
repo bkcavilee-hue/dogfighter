@@ -3,3 +3,6 @@ dist
 .DS_Store
 .vite
 *.log
+
+# Local backups of original (huge) GLB sources before decimation
+*.original.glb.bak

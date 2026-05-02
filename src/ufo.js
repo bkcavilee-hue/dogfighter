@@ -31,43 +31,49 @@ const _q = new THREE.Quaternion();
  *  to a simple disc + ring otherwise. Tints everything green. */
 function buildMesh(getMeshFn) {
   let mesh = getMeshFn ? getMeshFn() : null;
+  let usedGlb = false;
   if (mesh) {
+    usedGlb = true;
     // Tint all sub-materials green by overriding emissive on every mesh.
     mesh.traverse((o) => {
       if (o.isMesh && o.material) {
         const mats = Array.isArray(o.material) ? o.material : [o.material];
         for (const m of mats) {
           if ('emissive' in m) m.emissive = new THREE.Color(UFO_GREEN);
-          if ('emissiveIntensity' in m) m.emissiveIntensity = 0.6;
+          if ('emissiveIntensity' in m) m.emissiveIntensity = 0.8;
           if ('color' in m) m.color = new THREE.Color(0x88ffaa);
         }
       }
     });
-    // Scale up — UFO mesh defaults to plane-sized; we want it imposing.
-    mesh.scale.setScalar(2.4);
+    // NOTE: do NOT add a scale multiplier here. The preload step in
+    // models.js already scaled the GLB to UFO_TARGET_LENGTH (24m).
   } else {
     mesh = new THREE.Group();
+    // Fallback geometry sized to roughly match UFO_TARGET_LENGTH (24m wide).
     const disc = new THREE.Mesh(
-      new THREE.CylinderGeometry(7, 9, 2, 24),
-      new THREE.MeshStandardMaterial({ color: 0x88ffaa, emissive: UFO_GREEN, emissiveIntensity: 0.7, metalness: 0.5, roughness: 0.4 }),
+      new THREE.CylinderGeometry(10, 12, 2.5, 24),
+      new THREE.MeshStandardMaterial({ color: 0x88ffaa, emissive: UFO_GREEN, emissiveIntensity: 0.9, metalness: 0.5, roughness: 0.4 }),
     );
     const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(4, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2),
-      new THREE.MeshStandardMaterial({ color: 0xaaffcc, emissive: UFO_GREEN, emissiveIntensity: 0.4, transparent: true, opacity: 0.7 }),
+      new THREE.SphereGeometry(6, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0xaaffcc, emissive: UFO_GREEN, emissiveIntensity: 0.6, transparent: true, opacity: 0.75 }),
     );
-    dome.position.y = 1;
+    dome.position.y = 1.5;
     mesh.add(disc, dome);
   }
-  // Tractor-beam cone (always present, visibility/scale driven each tick).
+  mesh.userData.usedGlb = usedGlb;
+  // Tractor-beam cone — sized for a 24m UFO. Was 8m × 50m back when the
+  // UFO mesh was double-scaled; now the cone lives in the UFO's actual
+  // local frame, so we keep it modest so it doesn't dominate the view.
   const cone = new THREE.Mesh(
-    new THREE.ConeGeometry(8, 50, 18, 1, true),
+    new THREE.ConeGeometry(5, 28, 18, 1, true),
     new THREE.MeshBasicMaterial({
       color: UFO_GREEN, transparent: true, opacity: 0.0,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
     }),
   );
   cone.rotation.x = Math.PI; // tip points down
-  cone.position.y = -25;
+  cone.position.y = -16;     // hangs below the saucer
   cone.userData.isTractor = true;
   mesh.add(cone);
   return mesh;
@@ -88,7 +94,7 @@ export function createUfoBoss({ scene, position, getMeshFn = null }) {
   const hpBar = attachHpBar(mesh, { width: 28, height: 2.0, yOffset: 22 });
 
   // Boot-time verification log — confirms the GLB loaded vs fallback.
-  const usedGlb = !!(getMeshFn && getMeshFn !== null && mesh.children.some((c) => c.isGroup || c.children?.length));
+  const usedGlb = !!mesh.userData.usedGlb;
   console.log(`[ufo] boss spawned at (${position.x.toFixed(0)},${position.y.toFixed(0)},${position.z.toFixed(0)}) using ${usedGlb ? 'GLB' : 'fallback geometry'}`);
 
   return {
