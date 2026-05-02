@@ -31,7 +31,7 @@ import {
   setActiveMap, getActiveMap,
 } from './models.js';
 import { createUfoBoss, updateUfoBoss } from './ufo.js';
-import { createDrones, updateDrones, updateMines } from './drones.js';
+import { createDrones, updateDrones } from './drones.js';
 import { tickFX, tickContrail, removeContrail } from './fx.js';
 import { spawnDeathTumble, tickDeathTumbles } from './death-fx.js';
 import {
@@ -203,7 +203,6 @@ export async function startEngine() {
 
   // UFO2 drones — three orbiting around the UFO boss area.
   let drones = [];
-  let mines = [];
   if (mapCfg.hasUfoDrones) {
     drones = createDrones({ scene, getMeshFn: getUfo2Mesh });
   }
@@ -222,7 +221,6 @@ export async function startEngine() {
     // UFOs are local-simulated in every mode, so include them regardless.
     if (ufoBoss && ufoBoss.alive) allPlanes.push(ufoBoss);
     for (const d of drones) if (d.alive) allPlanes.push(d);
-    for (const m of mines)  if (m.alive) allPlanes.push(m);
   }
   refreshAllPlanes();
 
@@ -463,7 +461,7 @@ export async function startEngine() {
       // Gameplay frozen unless match is actively playing.
       if (match.state !== 'playing') continue;
 
-      // Keep allPlanes in sync — solo needs it too (drones/mines die / spawn).
+      // Keep allPlanes in sync — solo needs it too (drones die / spawn).
       refreshAllPlanes();
 
       // --- Player intent (keyboard → flight model) -----------------
@@ -684,10 +682,9 @@ export async function startEngine() {
       for (const m of ours)   if (m.alive) missiles.push(m);
       for (const m of ghosts) if (m.alive) missiles.push(m);
 
-      // UFO boss + drones + mines (solo only).
+      // UFO boss + drones.
       if (ufoBoss) updateUfoBoss(ufoBoss, allPlanes, scene, FIXED_DT, camera);
-      if (drones.length) updateDrones(drones, mines, allPlanes, scene, FIXED_DT, camera);
-      if (mines.length)  updateMines(mines, allPlanes, scene, FIXED_DT);
+      if (drones.length) updateDrones(drones, allPlanes, scene, FIXED_DT, camera);
 
       updateFlares(flares, scene, FIXED_DT);
 
@@ -718,7 +715,7 @@ export async function startEngine() {
       }
       p._wasAlive = p.alive;
 
-      // Defensive: a UFO/drone/mine that died THIS tick has its mesh
+      // Defensive: a UFO/drone that died THIS tick has its mesh
       // cleared by its update fn before allPlanes is rebuilt. Skip those.
       if (!p.mesh) continue;
 

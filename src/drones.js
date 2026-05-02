@@ -1,7 +1,6 @@
 // UFO2 drones: 3 small flying enemies orbiting the desert center. Each
-// fires a rapid-fire low-DPS laser at the closest player and deploys ONE
-// stationary "mine" orb. When the mine is destroyed, the drone deploys
-// another. Mines damage the player on contact and have their own HP.
+// fires a rapid-fire low-DPS laser at the closest player. (Mines used to
+// be deployed by drones — the mine system was removed.)
 import * as THREE from 'three';
 import { applyDamage } from './gamestate.js';
 import { attachHpBar } from './enemy-hpbar.js';
@@ -21,12 +20,6 @@ const DRONE_HEIGHT = 320;
 const DRONE_BURST_COUNT = 3;
 const DRONE_BURST_SHOT_INTERVAL = 0.13;     // s between shots in a burst
 const DRONE_BURST_REST = 1.5;               // s between bursts
-
-const MINE_HP = 25;
-const MINE_DAMAGE = 35;
-const MINE_RADIUS = 4.5;
-const MINE_DEPLOY_DELAY = 4.0;       // s after deploy before drone CAN drop next
-const MINE_COLOR = 0x44ff77;
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -105,8 +98,6 @@ function createDrone({ scene, getMeshFn, position, orbitPhase, index }) {
     _burstNextShotAt: 0,
     _burstRestTimer: 0,
     _activeBeams: [],
-    _mineCooldown: MINE_DEPLOY_DELAY,
-    _mine: null,
     // Multi-axis spin & bob (per-drone seeds)
     _spinX: Math.random() * 0.6 + 0.3,
     _spinY: Math.random() * 1.2 + 0.6,
@@ -132,8 +123,8 @@ function makeOrbitBody(position) {
   };
 }
 
-/* Per-frame: orbit, fire laser, manage mine. */
-export function updateDrones(drones, mines, allPlanes, scene, dt, camera = null) {
+/* Per-frame: orbit and fire laser. */
+export function updateDrones(drones, allPlanes, scene, dt, camera = null) {
   for (const d of drones) {
     if (!d.alive) {
       if (d.HP <= 0 && d.mesh && d.mesh.parent) {
@@ -181,17 +172,6 @@ export function updateDrones(drones, mines, allPlanes, scene, dt, camera = null)
     } else {
       d._burstShotsLeft = 0;
       d._burstRestTimer = 0;
-    }
-
-    // Mine management: deploy when cooldown elapsed and no active mine.
-    if (!d._mine || !d._mine.alive) {
-      d._mine = null;
-      d._mineCooldown = Math.max(0, d._mineCooldown - dt);
-      if (d._mineCooldown <= 0) {
-        d._mine = deployMine(d, scene);
-        mines.push(d._mine);
-        d._mineCooldown = MINE_DEPLOY_DELAY;
-      }
     }
 
     // Tick lasers.
@@ -254,80 +234,3 @@ function fireDroneLaser(drone, target, allPlanes, scene) {
   drone._activeBeams.push({ line, ttl: DRONE_LASER_TTL });
 }
 
-/* ------------------------- Mines ------------------------------------ */
-
-function deployMine(drone, scene) {
-  const dp = drone.body.translation();
-  const offset = (Math.random() - 0.5) * 60;
-  const pos = new THREE.Vector3(dp.x + offset, dp.y - 40 + (Math.random() - 0.5) * 30, dp.z + offset);
-  const mesh = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(MINE_RADIUS, 1),
-    new THREE.MeshStandardMaterial({
-      color: 0x99ffaa, emissive: MINE_COLOR, emissiveIntensity: 0.9,
-      transparent: true, opacity: 0.85,
-    }),
-  );
-  mesh.position.copy(pos);
-  scene.add(mesh);
-  const light = new THREE.PointLight(MINE_COLOR, 1.0, 50, 1.5);
-  light.position.copy(pos);
-  scene.add(light);
-
-  return {
-    id: `mine-${Math.random().toString(36).slice(2, 8)}`,
-    name: 'MINE',
-    team: DRONE_TEAM,
-    type: 'mine',
-    alive: true,
-    isPlayer: false,
-    isUfo: true,
-    HP: MINE_HP, maxHP: MINE_HP,
-    score: 0, speed: 0,
-    invincibleTimer: 0,
-    flares: 0, maxFlares: 0,
-    missileCD: 0, missileReloadSec: 99,
-    boost: 0, maxBoost: 0, heat: 0,
-    mesh, light,
-    stats: { colliderHalf: { x: MINE_RADIUS, y: MINE_RADIUS, z: MINE_RADIUS }, maxHP: MINE_HP, missiles: 0 },
-    body: makeOrbitBody(pos),
-    color: MINE_COLOR,
-    _pulse: 0,
-    _isMine: true,
-  };
-}
-
-export function updateMines(mines, allPlanes, scene, dt) {
-  for (let i = mines.length - 1; i >= 0; i--) {
-    const mine = mines[i];
-    if (!mine.alive) {
-      if (mine.mesh && mine.mesh.parent) {
-        scene.remove(mine.mesh);
-        if (mine.light) scene.remove(mine.light);
-        mine.mesh = null;
-      }
-      mines.splice(i, 1);
-      continue;
-    }
-    // Pulse visual
-    mine._pulse += dt;
-    const s = 1 + 0.15 * Math.sin(mine._pulse * 4);
-    mine.mesh.scale.setScalar(s);
-    if (mine.light) mine.light.intensity = 0.7 + 0.5 * (Math.sin(mine._pulse * 4) * 0.5 + 0.5);
-
-    // Proximity damage to planes (not other mines / drones).
-    const mp = mine.body.translation();
-    for (const p of allPlanes) {
-      if (!p.alive || p.team === mine.team) continue;
-      if (p === mine) continue;
-      const pp = p.body.translation();
-      const dx = pp.x - mp.x, dy = pp.y - mp.y, dz = pp.z - mp.z;
-      const dSq = dx * dx + dy * dy + dz * dz;
-      const r = MINE_RADIUS + (p.stats.colliderHalf?.x ?? 1.5);
-      if (dSq < r * r) {
-        applyDamage(p, MINE_DAMAGE, null);
-        mine.alive = false;
-        break;
-      }
-    }
-  }
-}
