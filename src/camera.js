@@ -21,8 +21,11 @@ export function createCamera() {
 export const cameraConfig = {
   height: 14,          // meters above plane (world space)
   back: 32,            // meters behind plane (world space, along horizontal heading)
-  followLerp: 0.14,
-  lookLerp: 0.20,
+  // Higher lerps = camera tracks heading changes more aggressively, so
+  // the view actively follows where the jet is pointed instead of lagging
+  // behind during turns.
+  followLerp: 0.32,
+  lookLerp: 0.40,
   lookAheadMeters: 70,
 };
 

@@ -188,8 +188,8 @@ export function createHUD() {
         cursor:pointer;font-family:inherit;
       ">LAUNCH MATCH</button>
       <div style="opacity:0.45;font-size:11px;margin-top:18px;font-family:monospace;letter-spacing:0.15em;line-height:1.6;">
-        W/S PITCH · A/D BANK-TURN · Z/X RUDDER · SPACE BOOST<br>
-        E FIRE · Q MISSILE · TAB CYCLE · SHIFT LOCK · A×2/D×2 DODGE · S×2 FLARES
+        ↑/↓ PITCH · ←/→ TURN · SPACE BOOST · W FLARES<br>
+        E FIRE · Q MISSILE · TAB CYCLE · SHIFT LOCK · ←×2/→×2 ROLL · ↑×2 LOOP
       </div>
     </div>
     <style>

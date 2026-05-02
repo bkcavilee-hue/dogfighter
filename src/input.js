@@ -1,32 +1,30 @@
 // Centralized input state. Uses KeyboardEvent.code so layout doesn't matter.
-// WASD and arrow keys are interchangeable. Double-tapping a direction triggers
-// a maneuver: W = loop, A = roll-left, D = roll-right, S = flares.
+// Movement is ARROW KEYS only. W is a dedicated flare key (single press).
+// Double-tapping arrows triggers maneuvers: ↑×2 loop, ←×2 roll-left, →×2 roll-right.
 export const input = {
-  climb: false,     // W or ArrowUp   — pitch up
-  dive: false,      // S or ArrowDown — pitch down
-  left: false,      // A or ArrowLeft  — yaw left (with auto-bank)
-  right: false,     // D or ArrowRight — yaw right
+  climb: false,     // ArrowUp    — pitch up
+  dive: false,      // ArrowDown  — pitch down
+  left: false,      // ArrowLeft  — yaw left (with auto-bank)
+  right: false,     // ArrowRight — yaw right
   boost: false,     // Space
   fire: false,      // E or LMB
   missile: false,   // Q (held)
   // Edge triggers (consumed once per tap):
-  loopTap: false,        // W×2 or ArrowUp×2 → backflip / alley-oop
-  rollLeftTap: false,    // A×2 or ArrowLeft×2
-  rollRightTap: false,   // D×2 or ArrowRight×2
-  flareTap: false,       // S×2 or ArrowDown×2
+  loopTap: false,        // ArrowUp×2 → backflip / alley-oop
+  rollLeftTap: false,    // ArrowLeft×2
+  rollRightTap: false,   // ArrowRight×2
+  flareTap: false,       // W (single press)
   missilePressed: false, // Q first-press
   tabPressed: false,     // Tab — cycle next lock candidate
   shiftPressed: false,   // Shift — commit lock / unlock
 };
 
 const DOUBLE_TAP_MS = 280;
-// Track double-taps by MANEUVER, not by logical pitch action — that way
-// inverting pitch doesn't move the loop/flare maneuvers around.
-//   W / ArrowUp    → loop  (regardless of whether W is climb or dive)
-//   S / ArrowDown  → flares
-//   A / ArrowLeft  → roll left
-//   D / ArrowRight → roll right
-const tapHistory = { loop: [], flare: [], rollL: [], rollR: [] };
+// Maneuver double-taps live on arrow keys only now.
+//   ArrowUp    → loop
+//   ArrowLeft  → roll left
+//   ArrowRight → roll right
+const tapHistory = { loop: [], rollL: [], rollR: [] };
 
 function tap(maneuver) {
   const now = performance.now();
@@ -35,7 +33,6 @@ function tap(maneuver) {
   while (hist.length && now - hist[0] > DOUBLE_TAP_MS) hist.shift();
   if (hist.length >= 2) {
     if (maneuver === 'loop')       input.loopTap = true;
-    else if (maneuver === 'flare') input.flareTap = true;
     else if (maneuver === 'rollL') input.rollLeftTap = true;
     else if (maneuver === 'rollR') input.rollRightTap = true;
     hist.length = 0;
@@ -44,26 +41,24 @@ function tap(maneuver) {
 
 function keyDown(code) {
   switch (code) {
-    // Standard arcade pitch: W / ArrowUp climbs, S / ArrowDown dives.
-    case 'KeyW':
     case 'ArrowUp':
-      if (!input.climb) tap('loop');   // double-tap W still triggers loop
+      if (!input.climb) tap('loop');
       input.climb = true;
       break;
-    case 'KeyS':
     case 'ArrowDown':
-      if (!input.dive) tap('flare');   // double-tap S still triggers flares
       input.dive = true;
       break;
-    case 'KeyA':
     case 'ArrowLeft':
       if (!input.left) tap('rollL');
       input.left = true;
       break;
-    case 'KeyD':
     case 'ArrowRight':
       if (!input.right) tap('rollR');
       input.right = true;
+      break;
+    case 'KeyW':
+      // W = drop flares (single press, edge-triggered).
+      input.flareTap = true;
       break;
     case 'Space': input.boost = true; break;
     case 'KeyE': input.fire = true; break;
@@ -83,13 +78,9 @@ function keyDown(code) {
 
 function keyUp(code) {
   switch (code) {
-    case 'KeyW':
     case 'ArrowUp':    input.climb = false; break;
-    case 'KeyS':
     case 'ArrowDown':  input.dive = false; break;
-    case 'KeyA':
     case 'ArrowLeft':  input.left = false; break;
-    case 'KeyD':
     case 'ArrowRight': input.right = false; break;
     case 'Space':      input.boost = false; break;
     case 'KeyE':       input.fire = false; break;
