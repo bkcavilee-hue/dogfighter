@@ -327,50 +327,36 @@ export function updateAircraft(plane, intent, dt) {
     return;
   }
 
-  // --- Normal flight: pitch + yaw applied as LOCAL-FRAME rotations ---
-  // Snappier response on input — drop the smoothing factor from 6→14 so
-  // the plane no longer feels stiff/auto-centered. Releasing inputs still
-  // eases (rather than snapping) for a clean feel without lag.
-  // Pitch input smoothing (yaw smoothing replaced by bank+rudder model below).
+  // --- Normal flight: pitch + yaw, NO roll. The jet stays flat in its
+  //     own frame — auto-bank is gone. Roll-tap maneuvers still apply
+  //     visual roll on the mesh only (body remains flat).
   const pitchAxisTarget = THREE.MathUtils.clamp(intent.pitch || 0, -1, 1);
   if (plane._pitchSmoothed === undefined) plane._pitchSmoothed = 0;
   plane._pitchSmoothed += (pitchAxisTarget - plane._pitchSmoothed) * Math.min(1, 14.0 * dt);
 
-  // CONTROLS 1: real flight + auto-bank coordinated turn.
-  //   - A/D → direct yaw input
-  //   - W/S → direct pitch input
-  //   - Yaw input also drives an automatic bank (visual roll into the turn)
   if (plane._yawSmoothed === undefined) plane._yawSmoothed = 0;
   const yawAxisTarget = THREE.MathUtils.clamp(intent.yaw || 0, -1, 1);
   plane._yawSmoothed += (yawAxisTarget - plane._yawSmoothed) * Math.min(1, 14.0 * dt);
 
-  // Auto-bank: target roll proportional to yaw input. Eases in fast,
-  // eases out slow. Applied as per-frame DELTA so accumulated body
-  // rotation stays bounded.
-  const MAX_BANK = THREE.MathUtils.degToRad(40);
-  const targetBank = -plane._yawSmoothed * MAX_BANK;
-  if (plane._bankAngle === undefined) plane._bankAngle = 0;
-  const bankLerp = Math.abs(targetBank) > Math.abs(plane._bankAngle) ? 6.0 : 2.5;
-  const newBank = plane._bankAngle + (targetBank - plane._bankAngle) * Math.min(1, bankLerp * dt);
-  const bankDelta = newBank - plane._bankAngle;
-  plane._bankAngle = newBank;
+  const yawDelta   = plane._yawSmoothed   * THREE.MathUtils.degToRad(s.turnRateDegPerSec)  * dt;
+  const pitchDelta = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
 
-  const yawDelta = plane._yawSmoothed * THREE.MathUtils.degToRad(s.turnRateDegPerSec) * dt;
-  let pitchDelta = plane._pitchSmoothed * THREE.MathUtils.degToRad(s.pitchRateDegPerSec) * dt;
-
-  // Pitch clamp ±70°: derive current pitch from forward.y, never let the
-  // delta push past the limit.
-  const fwdNow = _v3.set(0, 0, -1).applyQuaternion(q);
-  const currentPitch = Math.asin(THREE.MathUtils.clamp(fwdNow.y, -1, 1));
-  const PITCH_LIMIT = THREE.MathUtils.degToRad(70);
-  const newPitch = THREE.MathUtils.clamp(currentPitch + pitchDelta, -PITCH_LIMIT, PITCH_LIMIT);
-  pitchDelta = newPitch - currentPitch;
-
+  // Apply pitch then yaw as local-frame deltas. Because we never apply a
+  // roll delta and the body's roll is reset to 0 below, the jet always
+  // stays "flat" — its local up vector lives in the vertical plane
+  // containing its heading. Full ±180° pitch is allowed (loops are fine).
   const dqPitch = _qa.setFromAxisAngle(_axisX, pitchDelta);
   const dqYaw   = _qb.setFromAxisAngle(_axisY, yawDelta);
-  const dqBank  = _qc.setFromAxisAngle(new THREE.Vector3(0, 0, 1), bankDelta);
-  q.multiply(dqPitch).multiply(dqYaw).multiply(dqBank);
+  q.multiply(dqPitch).multiply(dqYaw);
   q.normalize();
+
+  // Strip any accumulated roll: rebuild q from yaw+pitch derived from the
+  // current forward vector. This keeps the wings level no matter what
+  // numerical drift accumulates.
+  const fwdNow = _v3.set(0, 0, -1).applyQuaternion(q).normalize();
+  const yawAngle   = Math.atan2(-fwdNow.x, -fwdNow.z); // heading from -Z forward
+  const pitchAngle = Math.asin(THREE.MathUtils.clamp(fwdNow.y, -1, 1));
+  q.setFromEuler(new THREE.Euler(pitchAngle, yawAngle, 0, 'YXZ'));
 
   body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
 

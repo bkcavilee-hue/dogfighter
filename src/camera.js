@@ -32,11 +32,15 @@ export const cameraConfig = {
 let _smoothedLookAt = new THREE.Vector3();
 let _initialized = false;
 
-// Camera B: fixed world-up chase. Camera sits behind+above the plane in
-// WORLD space (not the plane's local frame). Horizon never tilts — the
-// plane visibly banks/pitches beneath the camera. Classic arcade flight.
+// Angle-following chase camera. Sits behind + above the plane in the
+// plane's LOCAL frame (using its full pitch+yaw quaternion), so the
+// camera tilts with the nose. Because the jet never rolls (see aircraft.js)
+// the camera's up vector stays in the vertical plane and the horizon
+// never goes side-tilted — only pitches up/down with the jet.
 const _planeQ = new THREE.Quaternion();
 const _camForward = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
+const _smoothedUp = new THREE.Vector3(0, 1, 0);
 
 export function updateChaseCamera(camera, plane) {
   if (!plane) return;
@@ -46,32 +50,35 @@ export function updateChaseCamera(camera, plane) {
   const t = plane.body.translation();
   _targetPos.set(t.x, t.y, t.z);
 
-  // Project the plane's forward onto the horizontal (XZ) plane — bank and
-  // pitch don't move the camera, just heading.
-  _camForward.set(0, 0, -1).applyQuaternion(_planeQ);
-  _camForward.y = 0;
-  if (_camForward.lengthSq() < 1e-4) _camForward.set(0, 0, -1);
-  _camForward.normalize();
+  // Plane's full forward (includes pitch — jet has no roll, see aircraft.js).
+  _camForward.set(0, 0, -1).applyQuaternion(_planeQ).normalize();
+  // Plane's local up — perpendicular to forward, lying in the vertical
+  // plane containing the heading.
+  _camUp.set(0, 1, 0).applyQuaternion(_planeQ).normalize();
 
-  // World-space behind+above offset.
+  // Behind + above in the JET's frame, so when the jet pitches up the
+  // camera swings down-back behind the tail; when it pitches down the
+  // camera swings up-back. Same on-screen position for the jet at all
+  // attitudes.
   const desiredCamPos = _v.copy(_targetPos)
     .addScaledVector(_camForward, -cameraConfig.back)
-    .add(new THREE.Vector3(0, cameraConfig.height, 0));
+    .addScaledVector(_camUp, cameraConfig.height);
 
-  // Look-at slightly ahead so the player sees what they're flying into.
   const lookAhead = _smoothedLookAt.copy(_targetPos)
     .addScaledVector(_camForward, cameraConfig.lookAheadMeters);
 
   if (!_initialized) {
     camera.position.copy(desiredCamPos);
     _smoothedLookAt.copy(lookAhead);
+    _smoothedUp.copy(_camUp);
     _initialized = true;
   } else {
     camera.position.lerp(desiredCamPos, cameraConfig.followLerp);
     _smoothedLookAt.lerp(lookAhead, cameraConfig.lookLerp);
+    _smoothedUp.lerp(_camUp, cameraConfig.lookLerp).normalize();
   }
 
-  camera.up.set(0, 1, 0); // hard-locked world-up
+  camera.up.copy(_smoothedUp);
   camera.lookAt(_smoothedLookAt);
 }
 
