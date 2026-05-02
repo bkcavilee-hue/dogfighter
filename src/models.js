@@ -4,6 +4,7 @@
 // back to the placeholder geometry from aircraft.js.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 // (three-mesh-bvh removed — its prototype patches were causing a TDZ in the
 // production bundle. The heightmap bake guards against very high-poly meshes
@@ -48,6 +49,11 @@ const ORIENTATION = {
 const cache = new Map();
 const arenaCache = new Map();
 const loader = new GLTFLoader();
+// mountains.glb uses KHR_draco_mesh_compression. Without DRACOLoader, that
+// GLB silently fails to load. Self-hosted decoder lives at /draco/.
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('/draco/');
+loader.setDRACOLoader(dracoLoader);
 
 // Map registry. Each entry has its own ground GLB, optional ocean GLB, and
 // horizontal-fit length so they all align to ARENA dimensions. The active
@@ -271,8 +277,9 @@ export async function preloadArenaModels() {
         root.position.y = cfg.lift;
       }
       arenaCache.set(key, root);
+      console.log(`[models] loaded arena ${key} from ${path} (size ${size.x.toFixed(1)}x${size.y.toFixed(1)}x${size.z.toFixed(1)} → scale ${scale.toFixed(3)})`);
     } catch (err) {
-      console.warn(`[models] failed to load arena ${key} from ${path}:`, err);
+      console.error(`[models] FAILED to load arena ${key} from ${path}:`, err);
     }
   }));
 }

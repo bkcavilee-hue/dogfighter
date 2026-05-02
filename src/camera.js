@@ -34,15 +34,13 @@ export const cameraConfig = {
 let _smoothedLookAt = new THREE.Vector3();
 let _initialized = false;
 
-// Angle-following chase camera. Sits behind + above the plane in the
-// plane's LOCAL frame (using its full pitch+yaw quaternion), so the
-// camera tilts with the nose. Because the jet never rolls (see aircraft.js)
-// the camera's up vector stays in the vertical plane and the horizon
-// never goes side-tilted — only pitches up/down with the jet.
+// Fixed world-up chase. The camera sits behind+above the jet in WORLD
+// space, following only the jet's HORIZONTAL heading (compass direction).
+// Pitch and roll never move the camera. Horizon is permanently level.
+// When the jet pitches up or rolls or loops, the camera holds steady and
+// the jet visibly maneuvers in front of it.
 const _planeQ = new THREE.Quaternion();
 const _camForward = new THREE.Vector3();
-const _camUp = new THREE.Vector3();
-const _smoothedUp = new THREE.Vector3(0, 1, 0);
 
 export function updateChaseCamera(camera, plane) {
   if (!plane) return;
@@ -52,19 +50,19 @@ export function updateChaseCamera(camera, plane) {
   const t = plane.body.translation();
   _targetPos.set(t.x, t.y, t.z);
 
-  // Plane's full forward (includes pitch — jet has no roll, see aircraft.js).
-  _camForward.set(0, 0, -1).applyQuaternion(_planeQ).normalize();
-  // Plane's local up — perpendicular to forward, lying in the vertical
-  // plane containing the heading.
-  _camUp.set(0, 1, 0).applyQuaternion(_planeQ).normalize();
+  // Project the jet's forward onto the horizontal (XZ) plane — pitch
+  // and roll don't move the camera, just heading.
+  _camForward.set(0, 0, -1).applyQuaternion(_planeQ);
+  _camForward.y = 0;
+  if (_camForward.lengthSq() < 1e-4) _camForward.set(0, 0, -1);
+  _camForward.normalize();
 
-  // Behind + above in the JET's frame, so when the jet pitches up the
-  // camera swings down-back behind the tail; when it pitches down the
-  // camera swings up-back. Same on-screen position for the jet at all
-  // attitudes.
+  // Behind along the heading + above in WORLD up. Constant offsets so
+  // the camera sits at a fixed altitude relative to the jet regardless
+  // of nose attitude.
   const desiredCamPos = _v.copy(_targetPos)
     .addScaledVector(_camForward, -cameraConfig.back)
-    .addScaledVector(_camUp, cameraConfig.height);
+    .add(new THREE.Vector3(0, cameraConfig.height, 0));
 
   const lookAhead = _smoothedLookAt.copy(_targetPos)
     .addScaledVector(_camForward, cameraConfig.lookAheadMeters);
@@ -72,15 +70,13 @@ export function updateChaseCamera(camera, plane) {
   if (!_initialized) {
     camera.position.copy(desiredCamPos);
     _smoothedLookAt.copy(lookAhead);
-    _smoothedUp.copy(_camUp);
     _initialized = true;
   } else {
     camera.position.lerp(desiredCamPos, cameraConfig.followLerp);
     _smoothedLookAt.lerp(lookAhead, cameraConfig.lookLerp);
-    _smoothedUp.lerp(_camUp, cameraConfig.lookLerp).normalize();
   }
 
-  camera.up.copy(_smoothedUp);
+  camera.up.set(0, 1, 0); // hard-locked world-up — horizon never tilts
   camera.lookAt(_smoothedLookAt);
 }
 
