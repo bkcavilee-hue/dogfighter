@@ -70,8 +70,11 @@ export const MAPS = {
     paths: {
       island: '/assets/maps/mountains.glb',
     },
+    // mountains.glb is ~5.5x taller than the desert island. Cap visual
+    // height so peaks don't pierce the playable ceiling (1200m). The fit
+    // logic uses min(horizontalScale, verticalScale) when maxHeight is set.
     fit: {
-      island: { length: 2800, lift: 0 },
+      island: { length: 2800, lift: 0, maxHeight: 900 },
     },
     hasOcean: false,
     hasUfoBoss: false,
@@ -245,7 +248,14 @@ export async function preloadArenaModels() {
       const size = new THREE.Vector3();
       box.getSize(size);
       const widest = Math.max(size.x, size.z) || 1;
-      root.scale.setScalar(cfg.length / widest);
+      let scale = cfg.length / widest;
+      // If maxHeight is set, also clamp vertically so tall assets (mountains)
+      // don't poke through the playable ceiling.
+      if (cfg.maxHeight && size.y > 0) {
+        const heightScale = cfg.maxHeight / size.y;
+        if (heightScale < scale) scale = heightScale;
+      }
+      root.scale.setScalar(scale);
       // Re-center horizontally on origin; raise/lower per cfg.lift.
       const newBox = new THREE.Box3().setFromObject(root);
       const center = new THREE.Vector3();

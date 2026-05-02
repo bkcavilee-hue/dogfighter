@@ -32,7 +32,7 @@ import {
 } from './models.js';
 import { createUfoBoss, updateUfoBoss } from './ufo.js';
 import { createDrones, updateDrones, updateMines } from './drones.js';
-import { tickFX, tickContrail } from './fx.js';
+import { tickFX, tickContrail, removeContrail } from './fx.js';
 import { spawnDeathTumble, tickDeathTumbles } from './death-fx.js';
 import {
   initAudio, unlockAudio, sfxFlare, sfxManeuver, sfxLockWarning,
@@ -268,6 +268,16 @@ export async function startEngine() {
       const proxy = remotePlanes.get(id);
       if (!proxy) return;
       scene.remove(proxy.mesh);
+      // Dispose all geometries/materials hanging off the cloned mesh tree
+      // (cloned plane mesh + ring) so the GPU buffers are freed.
+      proxy.mesh.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+          if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+          else obj.material.dispose();
+        }
+      });
+      removeContrail(scene, proxy);
       remotePlanes.delete(id);
     });
     // Apply state snapshots to the matching proxy. If we receive state for
