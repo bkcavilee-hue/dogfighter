@@ -6,8 +6,8 @@ import { createNoise2D } from 'simplex-noise';
 import { RAPIER, createRigidBody, createCollider } from './physics.js';
 
 export const ARENA = {
-  width: 3000,           // intimate dogfighting arena
-  depth: 3000,
+  width: 1800,           // tighter — combat density 2.7× the old 3000m arena
+  depth: 1800,
   segments: 96,
   maxHeight: 280,
   seaLevel: 0,

@@ -46,18 +46,20 @@ const _axisZ = new THREE.Vector3(0, 0, 1);
 
 // Spawn slot table for the 3000m arena. Mid-altitude (~400m), inside the
 // 1200m ceiling, well within the X/Z bounds.
+// Spawns scaled to the 1800m arena (was 3000m). Closer = teams find each
+// other within seconds of match start.
 const SPAWNS = {
   red:  [
-    { x:    0, y: 400, z:  800 },
-    { x:  500, y: 420, z:  600 },
-    { x: -500, y: 420, z:  600 },
-    { x:    0, y: 450, z: 1100 },
+    { x:    0, y: 400, z:  500 },
+    { x:  300, y: 420, z:  400 },
+    { x: -300, y: 420, z:  400 },
+    { x:    0, y: 450, z:  700 },
   ],
   blue: [
-    { x:    0, y: 400, z: -800 },
-    { x:  500, y: 420, z: -600 },
-    { x: -500, y: 420, z: -600 },
-    { x:    0, y: 450, z: -1100 },
+    { x:    0, y: 400, z: -500 },
+    { x:  300, y: 420, z: -400 },
+    { x: -300, y: 420, z: -400 },
+    { x:    0, y: 450, z: -700 },
   ],
 };
 
@@ -162,7 +164,7 @@ export async function startEngine() {
   const playerTeam = isMultiplayer ? (network.you?.team || 'red') : 'red';
   const player = createAircraft({
     type: playerClass,
-    position: { x: 0, y: 400, z: 800 },
+    position: { x: 0, y: 400, z: 500 },
     team: playerTeam,
     isPlayer: true,
   });
@@ -170,12 +172,14 @@ export async function startEngine() {
   player.body.setLinvel({ x: 0, y: 0, z: -player.stats.minSpeed }, true);
   player.name = isMultiplayer ? (network.you?.name || 'You') : 'You';
 
-  // In SOLO mode: spawn 4 AI enemies in mixed difficulties. In MP: empty.
+  // In SOLO mode: spawn 4 AI enemies in mixed difficulties, clustered
+  // 300-500m IN FRONT of the player (player faces -Z from z=500).
+  // In MP: empty.
   const enemies = isMultiplayer ? [] : [
-    createAircraft({ type: 'interceptor', position: { x:  500, y: 400, z: -700 }, team: 'blue' }),
-    createAircraft({ type: 'striker',     position: { x: -500, y: 420, z: -750 }, team: 'blue' }),
-    createAircraft({ type: 'bruiser',     position: { x:    0, y: 450, z: -950 }, team: 'blue' }),
-    createAircraft({ type: 'striker',     position: { x:  650, y: 410, z: -550 }, team: 'blue' }),
+    createAircraft({ type: 'interceptor', position: { x:  250, y: 400, z:  100 }, team: 'blue' }),
+    createAircraft({ type: 'striker',     position: { x: -250, y: 420, z:    0 }, team: 'blue' }),
+    createAircraft({ type: 'bruiser',     position: { x:    0, y: 450, z: -150 }, team: 'blue' }),
+    createAircraft({ type: 'striker',     position: { x:  350, y: 410, z:  150 }, team: 'blue' }),
   ];
   for (const e of enemies) {
     scene.add(e.mesh);
@@ -189,14 +193,14 @@ export async function startEngine() {
   // Host-owned AI bots (MP only). Each has { plane, brain, weapon }.
   const bots = [];
 
-  // UFO boss enemy — spawned in ALL modes (solo + MP) on maps that
-  // declare hasUfoBoss. Position is in front of the player's spawn
-  // (player faces -Z from z=800) so it's visible immediately.
+  // UFO boss — spawned ahead of the player but BEHIND the enemy cluster
+  // (enemies at z=-150 to z=150, UFO at z=-400) so the player flies
+  // through the dogfight first and then meets the boss. Player at z=500.
   let ufoBoss = null;
   if (mapCfg.hasUfoBoss) {
     ufoBoss = createUfoBoss({
       scene,
-      position: new THREE.Vector3(0, 480, 200),
+      position: new THREE.Vector3(0, 520, -400),
       getMeshFn: getUfoMesh,
     });
   }
