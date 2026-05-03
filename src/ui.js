@@ -823,13 +823,15 @@ export function updateReticle(camera, player, enemies, softLock, missileLock, lo
         _rctx.fillText('LOCKED', proj.x, proj.y - size - 12);
       }
 
-      // Lead reticle — small yellow diamond at the target's predicted future
-      // position. Helps the player aim manually and shows missile lead.
+      // Lead reticle — bold "AIM HERE" marker at the target's predicted
+      // future position, with a thin line from the target reticle to the
+      // lead marker so the player can SEE the lead. This is the gun's
+      // shoot-here pip — put bullets on this dot to hit a moving target.
       const sv = softLock.body.linvel();
       const pp = player.body.translation();
       const dx = sp.x - pp.x, dy = sp.y - pp.y, dz = sp.z - pp.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      const APPARENT_BULLET_SPEED = 500; // m/s — visual lead time only
+      const APPARENT_BULLET_SPEED = 600; // m/s — visual lead time only
       const leadTime = THREE.MathUtils.clamp(dist / APPARENT_BULLET_SPEED, 0.05, 1.0);
       const leadPos = _noseTmp.set(
         sp.x + sv.x * leadTime,
@@ -837,7 +839,7 @@ export function updateReticle(camera, player, enemies, softLock, missileLock, lo
         sp.z + sv.z * leadTime,
       );
       const leadProj = _project(leadPos, camera);
-      if (leadProj.visible) drawLeadMarker(_rctx, leadProj.x, leadProj.y, color);
+      if (leadProj.visible) drawLeadMarker(_rctx, leadProj.x, leadProj.y, proj.x, proj.y, color);
     }
   }
 
@@ -1058,19 +1060,49 @@ function drawManualBracket(ctx, x, y, size, color, solid) {
 }
 
 /** Small diamond marker indicating the lead point ahead of a moving target. */
-function drawLeadMarker(ctx, x, y, color) {
+function drawLeadMarker(ctx, x, y, fromX, fromY, color) {
   ctx.save();
-  ctx.fillStyle = color;
-  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  // Thin dashed connector from target reticle → lead point so the player
+  // sees the velocity-prediction line.
+  ctx.strokeStyle = color;
   ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.globalAlpha = 0.55;
   ctx.beginPath();
-  ctx.moveTo(x, y - 5);
-  ctx.lineTo(x + 5, y);
-  ctx.lineTo(x, y + 5);
-  ctx.lineTo(x - 5, y);
-  ctx.closePath();
-  ctx.fill();
+  ctx.moveTo(fromX, fromY);
+  ctx.lineTo(x, y);
   ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1.0;
+
+  // Outer ring — outline so the marker pops over any background.
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.beginPath();
+  ctx.arc(x, y, 9, 0, Math.PI * 2);
+  ctx.stroke();
+  // Filled inner pip.
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, 5, 0, Math.PI * 2);
+  ctx.fill();
+  // Crosshair tick marks extending out of the ring (T/B/L/R).
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x - 14, y); ctx.lineTo(x - 10, y);
+  ctx.moveTo(x + 10, y); ctx.lineTo(x + 14, y);
+  ctx.moveTo(x, y - 14); ctx.lineTo(x, y - 10);
+  ctx.moveTo(x, y + 10); ctx.lineTo(x, y + 14);
+  ctx.stroke();
+  // Tiny "AIM" label below.
+  ctx.font = 'bold 8px monospace';
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.shadowColor = 'rgba(0,0,0,0.85)';
+  ctx.shadowBlur = 2;
+  ctx.fillText('AIM', x, y + 22);
+  ctx.shadowBlur = 0;
   ctx.restore();
 }
 

@@ -11,6 +11,13 @@ import * as THREE from 'three';
 import { findMissileLock, MISSILE } from './missiles.js';
 import { ARENA } from './arena.js';
 
+// AI-only altitude ceiling. The arena ceiling is 1200m for the player, but
+// AI was climbing to ~1100m which made dogfights feel out-of-reach. Pull
+// the AI ceiling down to ~600m so they stay in the dogfight band that
+// surrounds the spawn cluster (400-450m).
+const AI_ALT_CEILING = 600;
+const AI_ALT_BUFFER  = 80;   // start diving when above (CEILING - BUFFER)
+
 // Difficulty presets. Each AI has one of these baked in via createAIBrain.
 export const DIFFICULTY = {
   rookie: {
@@ -86,11 +93,12 @@ export function updateAI(plane, brain, allPlanes, dt) {
   const halfW = ARENA.width / 2;
   const halfD = ARENA.depth / 2;
   const edgeBuffer = 250;
-  const ceilingBuffer = 100;
   const nearEdge =
     Math.abs(pos.x) > halfW - edgeBuffer ||
     Math.abs(pos.z) > halfD - edgeBuffer;
-  const tooHigh = pos.y > ARENA.maxAltitude - ceilingBuffer;
+  // AI uses the AI_ALT_CEILING (600m), not ARENA.maxAltitude (1200m). The
+  // player gets the full 1200m; AI is kept in the dogfight band.
+  const tooHigh = pos.y > AI_ALT_CEILING - AI_ALT_BUFFER;
 
   // Cache AI's quaternion + its inverse for local-frame aim math.
   const r = plane.body.rotation();
