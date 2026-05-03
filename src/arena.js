@@ -6,8 +6,8 @@ import { createNoise2D } from 'simplex-noise';
 import { RAPIER, createRigidBody, createCollider } from './physics.js';
 
 export const ARENA = {
-  width: 1800,           // tighter — combat density 2.7× the old 3000m arena
-  depth: 1800,
+  width: 4000,           // 4k x 4k playable area
+  depth: 4000,
   segments: 96,
   maxHeight: 280,
   seaLevel: 0,
