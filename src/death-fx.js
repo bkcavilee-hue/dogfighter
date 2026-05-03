@@ -18,6 +18,18 @@ export function spawnDeathTumble(scene, plane) {
   if (!plane.mesh) return;
   // Clone the mesh so it lives independently of the original.
   const tumble = plane.mesh.clone(true);
+  // BUG FIX: Object3D.clone(true) shares MATERIAL instances with the
+  // source by reference. Without this deep-clone the fade pass below
+  // (m.opacity = fade) writes opacity 0 onto the player's *live* mesh's
+  // material, so the jet stays invisible after respawn. Deep-clone every
+  // material so the tumble fades only itself.
+  tumble.traverse((o) => {
+    if (o.isMesh && o.material) {
+      o.material = Array.isArray(o.material)
+        ? o.material.map((m) => m.clone())
+        : o.material.clone();
+    }
+  });
   // Copy world transform.
   plane.mesh.getWorldPosition(tumble.position);
   plane.mesh.getWorldQuaternion(tumble.quaternion);

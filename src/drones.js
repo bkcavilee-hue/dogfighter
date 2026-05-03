@@ -6,9 +6,9 @@ import { applyDamage } from './gamestate.js';
 import { attachHpBar } from './enemy-hpbar.js';
 
 const DRONE_TEAM = 'ufo';
-const DRONE_HP = 60;
+const DRONE_HP = 25;                          // weaker — was 60, easier to pop
 const DRONE_RADIUS = 3.0;
-const DRONE_LASER_DAMAGE = 1.0;             // very low — burst-fire compensates
+const DRONE_LASER_DAMAGE = 0.7;             // also softer per-shot damage
 const DRONE_LASER_RANGE = 500;
 const DRONE_LASER_TTL = 0.08;
 const DRONE_LASER_COLOR = 0x44ff77;

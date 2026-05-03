@@ -150,7 +150,7 @@ export function updateMissiles(missiles, allPlanes, scene, dt, onHit = null) {
   for (let i = missiles.length - 1; i >= 0; i--) {
     const m = missiles[i];
     if (!m.alive) {
-      destroyMissile(m, scene);
+      // Already torn down by a previous frame's hit/ttl pass — just splice.
       missiles.splice(i, 1);
       continue;
     }
@@ -206,6 +206,11 @@ export function updateMissiles(missiles, allPlanes, scene, dt, onHit = null) {
     // --- Lifetime ----------------------------------------------------
     m.ttl -= dt;
     if (m.ttl <= 0) {
+      // Brief fizzle puff so it's clear the missile died from age, not a
+      // hit. Then immediately tear down the mesh+trail+halo so the visible
+      // "icon" doesn't linger in the scene.
+      spawnExplosion(scene, m.pos.clone(), { count: 8, radius: 3, ttl: 0.4, color: 0xaaaaaa });
+      destroyMissile(m, scene);
       m.alive = false;
       continue;
     }
@@ -217,6 +222,7 @@ export function updateMissiles(missiles, allPlanes, scene, dt, onHit = null) {
       if (dx * dx + dy * dy + dz * dz < (prof.hitRadius * 1.5) ** 2) {
         spawnExplosion(scene, m.pos.clone(), { count: 14, radius: 5, ttl: 0.6, color: 0xfff0a0 });
         sfxExplosion();
+        destroyMissile(m, scene);
         m.alive = false;
         continue;
       }
@@ -236,6 +242,7 @@ export function updateMissiles(missiles, allPlanes, scene, dt, onHit = null) {
         else applyDamage(p, prof.damage, m.shooter);
         spawnExplosion(scene, m.pos.clone(), { count: 32, radius: 9, ttl: 1.0 });
         sfxExplosion();
+        destroyMissile(m, scene);
         m.alive = false;
         break;
       }
@@ -244,10 +251,24 @@ export function updateMissiles(missiles, allPlanes, scene, dt, onHit = null) {
 }
 
 function destroyMissile(m, scene) {
-  scene.remove(m.mesh);
-  m.mesh.geometry.dispose();
-  m.mesh.material.dispose();
-  scene.remove(m.trail);
-  m.trail.geometry.dispose();
-  m.trail.material.dispose();
+  // Idempotent: callable multiple times without error. The mesh may be a
+  // GLB Group (no .geometry / .material directly) or a fallback Mesh —
+  // traverse so both cases dispose cleanly.
+  if (m.mesh) {
+    scene.remove(m.mesh);
+    m.mesh.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const mat of mats) mat.dispose();
+      }
+    });
+    m.mesh = null;
+  }
+  if (m.trail) {
+    scene.remove(m.trail);
+    m.trail.geometry.dispose();
+    m.trail.material.dispose();
+    m.trail = null;
+  }
 }

@@ -1,6 +1,28 @@
 // Top-down chase camera at ~55° pitch. Follows the player's plane with a
 // little smoothing and bank-influenced offset.
+//
+// Three camera modes (toggle with C):
+//   'hybrid'  (C-mode, default): mesh stays visually flat, world horizon
+//             tilts to convey climbs/dives. Body still pitches mechanically.
+//   'cockpit' (B-mode): camera RIGID-locks to plane orientation. Plane
+//             appears motionless, world tumbles around it. No horizon lock.
+//   'classic' (original): plane mesh pitches with body, camera horizon-
+//             locked with clamped pitch. Pre-fixed-mesh behavior.
 import * as THREE from 'three';
+
+// Cockpit is the default — preferred feel per playtest. Order also
+// determines the C-key cycle: cockpit → hybrid → classic → cockpit.
+export const CAMERA_MODES = ['cockpit', 'hybrid', 'classic'];
+let _mode = 'cockpit';
+export function getCameraMode() { return _mode; }
+export function setCameraMode(m) {
+  if (CAMERA_MODES.includes(m)) _mode = m;
+}
+export function cycleCameraMode() {
+  const i = CAMERA_MODES.indexOf(_mode);
+  _mode = CAMERA_MODES[(i + 1) % CAMERA_MODES.length];
+  return _mode;
+}
 
 const _targetPos = new THREE.Vector3();
 const _camPos = new THREE.Vector3();
@@ -19,8 +41,8 @@ export function createCamera() {
 }
 
 export const cameraConfig = {
-  height: 9,           // meters above plane (in plane's local up)
-  back: 26,            // meters behind plane (along plane's local forward)
+  height: 7,           // meters above plane (in plane's local up)
+  back: 18,            // meters behind plane (along plane's local forward)
   // Higher lerps = camera tracks heading changes more aggressively, so
   // the view actively follows where the jet is pointed instead of lagging
   // behind during turns.
@@ -28,7 +50,7 @@ export const cameraConfig = {
   lookLerp: 0.40,
   // Look closer to the plane (was 70) so the jet is centered on screen
   // rather than dropped to the bottom of the frame by the look-ahead.
-  lookAheadMeters: 18,
+  lookAheadMeters: 14,
 };
 
 let _smoothedLookAt = new THREE.Vector3();
@@ -55,9 +77,13 @@ const _camForward = new THREE.Vector3(0, 0, -1);        // final, with clamped p
 const _worldUpVec = new THREE.Vector3(0, 1, 0);
 
 const VEL_BLEND = 0.30;                                   // 0 = nose only, 1 = velocity only
-const MAX_PITCH = Math.PI / 4;                            // ±45°
-const PITCH_FOLLOW_GAIN = 0.55;                           // 0 = no pitch tilt, 1 = full
+const MAX_PITCH = (50 * Math.PI) / 180;                   // ±50°
+const PITCH_FOLLOW_GAIN = 0.65;                           // 0 = no pitch tilt, 1 = full
 let _smoothedPitch = 0;
+
+// Cockpit-mode reusable temporaries.
+const _cockpitOffset = new THREE.Vector3();
+const _cockpitFwd = new THREE.Vector3();
 
 export function updateChaseCamera(camera, plane) {
   if (!plane) return;
@@ -66,6 +92,20 @@ export function updateChaseCamera(camera, plane) {
 
   const t = plane.body.translation();
   _targetPos.set(t.x, t.y, t.z);
+
+  // ----- COCKPIT MODE: rigid follow, no horizon lock -----------------------
+  // Camera adopts plane orientation so the plane appears motionless and the
+  // world tumbles around it. Disorienting but immersive.
+  if (_mode === 'cockpit') {
+    // Behind & slightly above in the plane's LOCAL frame (+Z is back from
+    // forward, +Y is up).
+    _cockpitOffset.set(0, 5, 16).applyQuaternion(_planeQ);
+    camera.position.copy(_targetPos).add(_cockpitOffset);
+    camera.quaternion.copy(_planeQ);
+    // Three's camera looks down -Z; plane forward is -Z, so quaternions match.
+    return;
+  }
+  // -----------------------------------------------------------------------
 
   // Jet's local forward (full 3D — includes pitch).
   _localFwd.set(0, 0, -1).applyQuaternion(_planeQ);
@@ -106,9 +146,12 @@ export function updateChaseCamera(camera, plane) {
   // ----- PITCH (clamped) -------------------------------------------------
   // Raw pitch derived from blend direction's Y component, scaled by
   // PITCH_FOLLOW_GAIN so the camera tilts less than the jet does.
+  // Hybrid mode pushes the gain higher because the mesh stays flat — the
+  // camera/horizon must carry the climb/dive signal alone.
+  const gain = (_mode === 'hybrid') ? 0.90 : PITCH_FOLLOW_GAIN;
   const rawPitch = Math.asin(THREE.MathUtils.clamp(_blendDir.y, -1, 1));
   const targetPitch = THREE.MathUtils.clamp(
-    rawPitch * PITCH_FOLLOW_GAIN,
+    rawPitch * gain,
     -MAX_PITCH, MAX_PITCH,
   );
   _smoothedPitch += (targetPitch - _smoothedPitch) * cameraConfig.lookLerp;

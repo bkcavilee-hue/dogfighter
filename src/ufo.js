@@ -1,26 +1,27 @@
-// UFO boss enemy. Drifts around the arena, fires a sustained green beam
-// at the closest player. Tractor-beam cone removed per request.
+// UFO boss enemy. Drifts around the arena and fires homing missiles
+// (MISSILE_SLOW profile) at the closest hostile player on a fixed cooldown.
+// Tractor-beam cone and sustained beam laser removed per request.
 //
 // The boss exposes a "plane-like" surface (id, body{translation,rotation,
 // linvel}, mesh, HP, alive, team, stats.colliderHalf) so existing helpers
 // (minimap, soft-lock, weapon hit-tests, off-screen indicators) work
 // without modification.
 import * as THREE from 'three';
-import { applyDamage } from './gamestate.js';
 import { attachHpBar } from './enemy-hpbar.js';
+import { fireMissile, MISSILE_SLOW } from './missiles.js';
 
 const UFO_TEAM = 'ufo';
 const UFO_HP = 700;                  // ~10× interceptor
 const UFO_RADIUS = 8;
-const UFO_LASER_RANGE = 900;
-const UFO_LASER_DPS = 10;            // damage per second while sustained beam connects
-const UFO_BEAM_CHARGE_SEC = 0.4;     // wind-up before beam ignites
-const UFO_BEAM_RECOVER_SEC = 0.6;    // brief pause if target lost / dies
+// Missile-fire profile (replaces the old sustained beam laser).
+const UFO_MISSILE_RANGE = 1100;      // slightly longer than detection-cone fire range
+const UFO_MISSILE_COOLDOWN = 4.0;    // seconds between launches when target available
+const UFO_MISSILE_INITIAL_DELAY = 2.5; // grace period after spawn
 const UFO_GREEN = 0x44ff77;
 const UFO_DETECTION_RANGE = 1400;
 const UFO_DRIFT_SPEED = 6;           // m/s drift between waypoints
 const UFO_DRIFT_RADIUS = 200;        // wander region around origin
-const UFO_SPAWN_Y = 480;             // matches engine.js spawn position
+const UFO_SPAWN_Y = 380;             // matches engine.js spawn position
 
 /** Build the visible UFO mesh.
  *
@@ -38,14 +39,22 @@ function buildMesh(getMeshFn) {
   let usedGlb = false;
   if (spinner) {
     usedGlb = true;
+    // BUG FIX: previously this overwrote BOTH `m.color` AND `m.emissive` on
+    // every material in the GLB, which washed all surface detail / textures
+    // out into a solid green silhouette. Materials are also shared between
+    // the prototype and clones — so the override leaked across instances.
+    // New behaviour: clone each material (so the prototype stays untouched),
+    // then apply only a SUBTLE green emissive accent. The GLB's authored
+    // base color / textures show through.
     spinner.traverse((o) => {
       if (o.isMesh && o.material) {
         const mats = Array.isArray(o.material) ? o.material : [o.material];
-        for (const m of mats) {
+        const cloned = mats.map((m) => m.clone());
+        for (const m of cloned) {
           if ('emissive' in m) m.emissive = new THREE.Color(UFO_GREEN);
-          if ('emissiveIntensity' in m) m.emissiveIntensity = 0.8;
-          if ('color' in m) m.color = new THREE.Color(0x88ffaa);
+          if ('emissiveIntensity' in m) m.emissiveIntensity = 0.25;
         }
+        o.material = Array.isArray(o.material) ? cloned : cloned[0];
       }
     });
     // NOTE: don't add a scale multiplier — preload in models.js already
@@ -119,12 +128,8 @@ export function createUfoBoss({ scene, position, getMeshFn = null }) {
     },
     body: makeStaticBody(position),
     color: UFO_GREEN,
-    // Sustained beam state.
-    _beamState: 'idle',
-    _beamTimer: 0,
-    _beamTarget: null,
-    _beamLine: null,
-    _beamLight: null,
+    // Missile-launcher state (replaces the old beam state machine).
+    _missileCD: UFO_MISSILE_INITIAL_DELAY,
     // Motion state.
     _spinX: Math.random() * 0.4 + 0.1,
     _spinY: Math.random() * 0.6 + 0.4,
@@ -151,8 +156,10 @@ function makeStaticBody(position) {
   };
 }
 
-/** Per-frame tick: drift / spin / bob, then sustained beam state machine. */
-export function updateUfoBoss(ufo, allPlanes, scene, dt, camera = null) {
+/** Per-frame tick: drift / spin / bob, then missile-launcher cooldown.
+ *  `missiles` array is appended to when the UFO fires a homing missile.
+ */
+export function updateUfoBoss(ufo, allPlanes, scene, dt, camera = null, missiles = null) {
   if (!ufo.alive) {
     // Cleanup runs whenever the UFO is no longer alive — no longer
     // gated on HP <= 0 (mesh would have leaked if alive flipped some
@@ -161,16 +168,6 @@ export function updateUfoBoss(ufo, allPlanes, scene, dt, camera = null) {
       if (ufo.hpBar) ufo.hpBar.dispose();
       scene.remove(ufo.mesh);
       if (ufo.halo) scene.remove(ufo.halo);
-      if (ufo._beamLine) {
-        scene.remove(ufo._beamLine);
-        ufo._beamLine.geometry.dispose();
-        ufo._beamLine.material.dispose();
-        ufo._beamLine = null;
-      }
-      if (ufo._beamLight) {
-        scene.remove(ufo._beamLight);
-        ufo._beamLight = null;
-      }
       ufo.mesh = null;
     }
     return;
@@ -225,96 +222,32 @@ export function updateUfoBoss(ufo, allPlanes, scene, dt, camera = null) {
     if (d < bestDistSq) { bestDistSq = d; target = p; }
   }
 
-  // ---- Sustained beam state machine --------------------------------
-  ufo._beamTimer = Math.max(0, ufo._beamTimer - dt);
-  switch (ufo._beamState) {
-    case 'idle':
-      if (target) {
-        ufo._beamState = 'charging';
-        ufo._beamTimer = UFO_BEAM_CHARGE_SEC;
-        ufo._beamTarget = target;
-      }
-      break;
-    case 'charging':
-      if (!target) {
-        ufo._beamState = 'idle';
-        ufo._beamTarget = null;
-      } else if (ufo._beamTimer <= 0) {
-        ufo._beamState = 'firing';
-        ufo._beamTarget = target;
-      }
-      break;
-    case 'firing': {
-      // FIX: drop to recover when target dies, switches identity, OR
-      // moves beyond laser range. Previously the beam stayed visually
-      // attached to a fleeing target while doing zero damage.
-      const tgt = ufo._beamTarget;
-      const lost = !target || target !== tgt || !tgt?.alive;
-      let outOfRange = false;
-      if (!lost && tgt) {
-        const tp = tgt.body.translation();
-        const rx = tp.x - newX, ry = tp.y - newY, rz = tp.z - newZ;
-        outOfRange = (rx * rx + ry * ry + rz * rz) > UFO_LASER_RANGE * UFO_LASER_RANGE;
-      }
-      if (lost || outOfRange) {
-        ufo._beamState = 'recover';
-        ufo._beamTimer = UFO_BEAM_RECOVER_SEC;
-        ufo._beamTarget = null;
-      } else {
-        applyBeamDamage(ufo, tgt, dt);
-      }
-      break;
-    }
-    case 'recover':
-      if (ufo._beamTimer <= 0) ufo._beamState = 'idle';
-      break;
-  }
-
-  // ---- Beam visual: a green line from boss to target while charging
-  //      or firing. Pulses thicker/brighter when firing.
-  const showBeam = (ufo._beamState === 'charging' || ufo._beamState === 'firing') && (ufo._beamTarget || target);
-  if (showBeam) {
-    const tgt = ufo._beamTarget || target;
-    const tp = tgt.body.translation();
-    const origin = new THREE.Vector3(newX, newY + 2, newZ);
-    const end = new THREE.Vector3(tp.x, tp.y, tp.z);
-    if (!ufo._beamLine) {
-      const geom = new THREE.BufferGeometry().setFromPoints([origin, end]);
-      const mat = new THREE.LineBasicMaterial({
-        color: UFO_GREEN, transparent: true, opacity: 1.0,
+  // ---- Missile launcher: cooldown-based fire on the closest hostile.
+  // The UFO tilts the missile origin slightly forward+up of the saucer's
+  // centroid so the missile doesn't spawn inside the dome. Uses MISSILE_SLOW
+  // profile so the player has time to flare or evade.
+  ufo._missileCD = Math.max(0, ufo._missileCD - dt);
+  if (target && missiles && ufo._missileCD <= 0) {
+    const tp = target.body.translation();
+    const rx = tp.x - newX, ry = tp.y - newY, rz = tp.z - newZ;
+    const distSq = rx * rx + ry * ry + rz * rz;
+    if (distSq <= UFO_MISSILE_RANGE * UFO_MISSILE_RANGE) {
+      const shot = fireMissile({
+        shooter: ufo,
+        target,
+        scene,
+        profile: MISSILE_SLOW,
       });
-      ufo._beamLine = new THREE.Line(geom, mat);
-      scene.add(ufo._beamLine);
-      ufo._beamLight = new THREE.PointLight(UFO_GREEN, 1.5, 80, 1.5);
-      scene.add(ufo._beamLight);
+      // The UFO's static body has identity rotation, so fireMissile would
+      // launch the missile down world -Z by default. Re-aim it directly at
+      // the target with proper offset so it doesn't spawn inside the saucer.
+      const dist = Math.sqrt(distSq) || 1;
+      const dx = rx / dist, dy = ry / dist, dz = rz / dist;
+      shot.pos.set(newX + dx * 10, newY + dy * 10 + 2, newZ + dz * 10);
+      shot.vel.set(dx * MISSILE_SLOW.initialSpeed, dy * MISSILE_SLOW.initialSpeed, dz * MISSILE_SLOW.initialSpeed);
+      shot.mesh.position.copy(shot.pos);
+      missiles.push(shot);
+      ufo._missileCD = UFO_MISSILE_COOLDOWN;
     }
-    const positions = ufo._beamLine.geometry.attributes.position.array;
-    positions[0] = origin.x; positions[1] = origin.y; positions[2] = origin.z;
-    positions[3] = end.x;    positions[4] = end.y;    positions[5] = end.z;
-    ufo._beamLine.geometry.attributes.position.needsUpdate = true;
-    const pulse = 0.7 + 0.3 * Math.sin(performance.now() * 0.04);
-    ufo._beamLine.material.opacity = ufo._beamState === 'firing' ? pulse : pulse * 0.55;
-    if (ufo._beamLight) {
-      ufo._beamLight.position.copy(origin).lerp(end, 0.5);
-      ufo._beamLight.intensity = ufo._beamState === 'firing' ? 1.5 : 0.6;
-    }
-  } else if (ufo._beamLine) {
-    scene.remove(ufo._beamLine);
-    ufo._beamLine.geometry.dispose();
-    ufo._beamLine.material.dispose();
-    ufo._beamLine = null;
-    if (ufo._beamLight) scene.remove(ufo._beamLight);
-    ufo._beamLight = null;
   }
-}
-
-/** Continuous DPS application — only counts when target is in range. */
-function applyBeamDamage(ufo, target, dt) {
-  if (!target || !target.alive) return;
-  const pos = ufo.body.translation();
-  const tp = target.body.translation();
-  const dx = tp.x - pos.x, dy = tp.y - pos.y, dz = tp.z - pos.z;
-  const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-  if (d > UFO_LASER_RANGE) return;
-  applyDamage(target, UFO_LASER_DPS * dt, ufo);
 }
