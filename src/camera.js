@@ -51,6 +51,9 @@ export const cameraConfig = {
   // Look closer to the plane (was 70) so the jet is centered on screen
   // rather than dropped to the bottom of the frame by the look-ahead.
   lookAheadMeters: 14,
+  // Cockpit-mode offset (mouse-wheel adjustable too).
+  cockpitBack: 16,
+  cockpitHeight: 5,
 };
 
 let _smoothedLookAt = new THREE.Vector3();
@@ -98,8 +101,9 @@ export function updateChaseCamera(camera, plane) {
   // world tumbles around it. Disorienting but immersive.
   if (_mode === 'cockpit') {
     // Behind & slightly above in the plane's LOCAL frame (+Z is back from
-    // forward, +Y is up).
-    _cockpitOffset.set(0, 5, 16).applyQuaternion(_planeQ);
+    // forward, +Y is up). Both values are wheel-adjustable via cameraConfig
+    // so scroll zoom-out works in cockpit mode too.
+    _cockpitOffset.set(0, cameraConfig.cockpitHeight, cameraConfig.cockpitBack).applyQuaternion(_planeQ);
     camera.position.copy(_targetPos).add(_cockpitOffset);
     camera.quaternion.copy(_planeQ);
     // Three's camera looks down -Z; plane forward is -Z, so quaternions match.
@@ -189,12 +193,18 @@ export function updateChaseCamera(camera, plane) {
   camera.lookAt(_smoothedLookAt);
 }
 
-// Mouse wheel zoom — adjusts height/back proportionally.
+// Mouse wheel zoom — adjusts height/back proportionally for ALL camera
+// modes. Range is intentionally generous on the upper end (back: 18→250m)
+// so the player can pull WAY out for a strategic view of the dogfight.
+// Cockpit mode has its own (smaller) cockpitBack/cockpitHeight pair so
+// scroll works there too without nesting the camera 200m back of a tail.
 export function attachZoom(camera) {
   window.addEventListener('wheel', (e) => {
     const delta = Math.sign(e.deltaY);
-    cameraConfig.height = THREE.MathUtils.clamp(cameraConfig.height + delta * 3, 4, 60);
-    cameraConfig.back   = THREE.MathUtils.clamp(cameraConfig.back   + delta * 4, 20, 110);
+    cameraConfig.height = THREE.MathUtils.clamp(cameraConfig.height + delta * 3, 4, 120);
+    cameraConfig.back   = THREE.MathUtils.clamp(cameraConfig.back   + delta * 6, 12, 250);
+    cameraConfig.cockpitHeight = THREE.MathUtils.clamp(cameraConfig.cockpitHeight + delta * 1, 3, 30);
+    cameraConfig.cockpitBack   = THREE.MathUtils.clamp(cameraConfig.cockpitBack + delta * 2, 8, 80);
   }, { passive: true });
 }
 
