@@ -6,11 +6,13 @@ import * as THREE from 'three';
 import { getBirdMesh, getCloudMesh } from './models.js';
 import { ARENA } from './arena.js';
 
-const CLOUD_COUNT = 14;
+// Counts scaled for the 4k arena (was sized for 1800m). Decor density stays
+// roughly constant — area is now ~5× larger.
+const CLOUD_COUNT = 32;
 const CLOUD_ALT_MIN = 600;
 const CLOUD_ALT_MAX = 1000;
 
-const FLOCK_COUNT = 5;          // number of flocks scattered across the arena
+const FLOCK_COUNT = 10;         // number of flocks scattered across the arena
 const BIRDS_PER_FLOCK = 7;
 const BIRD_ALT_MIN = 60;
 const BIRD_ALT_MAX = 220;

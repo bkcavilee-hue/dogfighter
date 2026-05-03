@@ -185,15 +185,22 @@ export async function startEngine() {
   player.body.setLinvel({ x: 0, y: 0, z: -player.stats.minSpeed }, true);
   player.name = isMultiplayer ? (network.you?.name || 'You') : 'You';
 
-  // In SOLO mode: spawn 4 AI enemies in mixed difficulties, clustered
-  // 300-500m IN FRONT of the player (player faces -Z from z=500).
-  // In MP: empty.
-  const enemies = isMultiplayer ? [] : [
-    createAircraft({ type: 'interceptor', position: { x:  250, y: 400, z:  100 }, team: 'blue' }),
-    createAircraft({ type: 'striker',     position: { x: -250, y: 420, z:    0 }, team: 'blue' }),
-    createAircraft({ type: 'bruiser',     position: { x:    0, y: 450, z: -150 }, team: 'blue' }),
-    createAircraft({ type: 'striker',     position: { x:  350, y: 410, z:  150 }, team: 'blue' }),
-  ];
+  // SOLO = FFA. Each AI is on its OWN team so they fight each other AND
+  // the player. 8 enemies spawned in a ring around the origin so the
+  // 4k-arena fights kick off from spread starting positions instead of
+  // bunching up in one cluster.
+  const FFA_RING_COUNT = 8;
+  const FFA_RING_RADIUS = 700;          // m from origin
+  const FFA_TYPES = ['interceptor', 'striker', 'bruiser'];
+  const enemies = isMultiplayer ? [] : Array.from({ length: FFA_RING_COUNT }, (_, i) => {
+    const angle = (i / FFA_RING_COUNT) * Math.PI * 2;
+    const x = Math.cos(angle) * FFA_RING_RADIUS;
+    const z = Math.sin(angle) * FFA_RING_RADIUS;
+    const y = 380 + ((i * 37) % 90);    // stagger altitude 380-470
+    const type = FFA_TYPES[i % FFA_TYPES.length];
+    // Each AI gets a unique team string → FFA: no team filtering between AIs.
+    return createAircraft({ type, position: { x, y, z }, team: `ffa-${i}` });
+  });
   for (const e of enemies) {
     scene.add(e.mesh);
     e.body.setLinvel({ x: 0, y: 0, z: -e.stats.maxSpeed }, true);
@@ -244,13 +251,11 @@ export async function startEngine() {
   refreshAllPlanes();
 
   const playerWeapon = createWeaponState();
-  // Mixed difficulty roster for solo FFA.
-  const aiBrains = isMultiplayer ? [] : [
-    createAIBrain('rookie'),
-    createAIBrain('rookie'),
-    createAIBrain('veteran'),
-    createAIBrain('ace'),
-  ];
+  // Mixed difficulty roster for solo FFA. One brain per enemy — the array
+  // length must match enemies.length. Repeat the pattern as we add more
+  // bots so each plane always gets a brain.
+  const FFA_DIFFICULTIES = ['rookie', 'rookie', 'veteran', 'veteran', 'veteran', 'ace', 'ace', 'rookie'];
+  const aiBrains = isMultiplayer ? [] : enemies.map((_, i) => createAIBrain(FFA_DIFFICULTIES[i % FFA_DIFFICULTIES.length]));
   const aiWeapons = enemies.map(() => createWeaponState());
   const missiles = []; // active missiles in flight
   const flares = [];   // active decoy flares

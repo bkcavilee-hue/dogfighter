@@ -76,11 +76,11 @@ export const MAPS = {
       island: '/assets/maps/island.glb',
     },
     fit: {
-      island: { length: 2800, lift: 0 },
+      island: { length: 3800, lift: 0 },
     },
     hasOcean: false,
-    hasUfoBoss: true,
-    hasUfoDrones: true,
+    hasUfoBoss: false,    // UFO boss removed — pure FFA dogfight now
+    hasUfoDrones: false,  // drones go with the boss
   },
 };
 let activeMapId = 'desert';
