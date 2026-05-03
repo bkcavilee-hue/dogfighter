@@ -30,8 +30,14 @@ const _q = new THREE.Quaternion();
 const SOFT_LOCK = { coneDeg: 22, range: 400 };
 const _v3 = new THREE.Vector3();
 export function findSoftLock(plane, allPlanes) {
-  const r = plane.body.rotation();
-  _q.set(r.x, r.y, r.z, r.w);
+  // Use mesh quaternion so the soft-lock cone matches where the player
+  // visibly aims (matters in hybrid camera mode where mesh ≠ body).
+  if (plane.mesh) {
+    _q.copy(plane.mesh.quaternion);
+  } else {
+    const r = plane.body.rotation();
+    _q.set(r.x, r.y, r.z, r.w);
+  }
   const fwd = _v3.set(0, 0, -1).applyQuaternion(_q);
   const pp = plane.body.translation();
   const cosCone = Math.cos(THREE.MathUtils.degToRad(SOFT_LOCK.coneDeg));
@@ -134,9 +140,18 @@ export function updateWeapons(plane, weapon, fire, otherPlanes, scene, dt, softL
 
 function fireShot(plane, weapon, otherPlanes, scene, softLock, onHit, hitRadiusBoost = 0.4) {
   const t = plane.body.translation();
-  const r = plane.body.rotation();
   _origin.set(t.x, t.y, t.z);
-  _q.set(r.x, r.y, r.z, r.w);
+  // Fire in the direction the VISIBLE mesh is pointing (not the body).
+  // In hybrid camera mode the mesh is yaw-only while the body still pitches —
+  // using the body would shoot the tracer up into the sky while the jet
+  // visibly stays level. Mesh-forward keeps muzzle/tracer/aim all consistent
+  // with what the player sees. Falls back to body rotation if mesh is missing.
+  if (plane.mesh) {
+    _q.copy(plane.mesh.quaternion);
+  } else {
+    const r = plane.body.rotation();
+    _q.set(r.x, r.y, r.z, r.w);
+  }
   _dir.set(0, 0, -1).applyQuaternion(_q);
 
   // Aim assist: bend shot toward soft-locked target if angle is small enough.

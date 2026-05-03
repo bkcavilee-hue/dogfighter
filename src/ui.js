@@ -57,8 +57,21 @@ export function createHUD() {
     border-radius: 6px; font-family: monospace; font-size: 12px;
     letter-spacing: 0.08em;
   `;
-  banner.textContent = '↑ climb · ↓ dive · ←/→ turn · Space boost · W flares · E fire · Q missile · Tab cycle · Shift lock · ←×2/→×2 roll · ↑×2 loop';
+  banner.textContent = '↑ climb · ↓ dive · ←/→ turn · Space boost · W flares · E fire · Q missile · Tab cycle · Shift lock · C cycle cam · 1/2/3 cam · ←×2/→×2 roll · ↑×2 loop';
   document.body.appendChild(banner);
+
+  // Camera-mode badge — shows the active camera mode + the keys to switch.
+  const camBadge = document.createElement('div');
+  camBadge.id = 'camBadge';
+  camBadge.style.cssText = `
+    position: fixed; top: 64px; left: 16px; z-index: 100;
+    background: rgba(8,16,28,0.78); backdrop-filter: blur(8px);
+    border-left: 3px solid #ffaa44; color: #ffd9a0; padding: 6px 12px;
+    border-radius: 6px; font-family: monospace; font-size: 11px;
+    letter-spacing: 0.08em;
+  `;
+  camBadge.textContent = 'CAM: cockpit  ·  1 cockpit · 2 hybrid · 3 classic';
+  document.body.appendChild(camBadge);
 
   // Reticle / lock overlay (full-screen canvas)
   _reticle = document.createElement('canvas');

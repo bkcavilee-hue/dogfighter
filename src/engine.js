@@ -5,13 +5,17 @@ import { initPhysics, world, syncMesh } from './physics.js';
 import {
   input, initInput, consumeMissileTap,
   consumeLoopTap, consumeRollLeftTap, consumeRollRightTap, consumeFlareTap,
-  consumeTabTap, consumeShiftTap,
+  consumeTabTap, consumeShiftTap, consumeCameraToggle,
+  consumeCam1, consumeCam2, consumeCam3,
 } from './input.js';
 import {
   ARENA, generateHeightmap, createTerrain, createOcean, createSky, setupLights,
 } from './arena.js';
 import { createAircraft, updateAircraft, PLANE_STATS } from './aircraft.js';
-import { createCamera, updateChaseCamera, attachZoom, onResize } from './camera.js';
+import {
+  createCamera, updateChaseCamera, attachZoom, onResize,
+  cycleCameraMode, getCameraMode, setCameraMode,
+} from './camera.js';
 import { createWeaponState, updateWeapons, findSoftLock } from './weapons.js';
 import { createAIBrain, updateAI } from './ai.js';
 import { findMissileLock, fireMissile, updateMissiles, MISSILE_SLOW } from './missiles.js';
@@ -28,8 +32,9 @@ import { createMatchState, startMatch, tickMatch } from './match.js';
 import {
   preloadPlaneModels, preloadArenaModels, preloadMissileModel, preloadUfoModel,
   preloadUfo2Model, getArenaModel, bakeIslandHeightmap, getUfoMesh, getUfo2Mesh,
-  setActiveMap, getActiveMap,
+  setActiveMap, getActiveMap, preloadDecorModels,
 } from './models.js';
+import { spawnDecor, tickDecor } from './decor.js';
 import { createUfoBoss, updateUfoBoss } from './ufo.js';
 import { createDrones, updateDrones } from './drones.js';
 import { tickFX, tickContrail, removeContrail } from './fx.js';
@@ -43,6 +48,9 @@ import { createRemotePlane, applyRemoteState, tickRemotePlane, buildLocalState }
 const FIXED_DT = 1 / 60;
 const _maneuverQ = new THREE.Quaternion();
 const _axisZ = new THREE.Vector3(0, 0, 1);
+// Hybrid mesh-strip temporaries (avoid per-frame allocation).
+const _hybridFwd = new THREE.Vector3();
+const _hybridEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 
 // Spawn slot table for the 3000m arena. Mid-altitude (~400m), inside the
 // 1200m ceiling, well within the X/Z bounds.
@@ -108,6 +116,7 @@ export async function startEngine() {
     preloadMissileModel(),
     preloadUfoModel(),
     preloadUfo2Model(),
+    preloadDecorModels(),
   ]);
 
   // --- Class select + lobby -------------------------------------------
@@ -138,6 +147,10 @@ export async function startEngine() {
   // Now that we know the map, start the arena preload + finish the common preload.
   await Promise.all([commonLoadPromise, preloadArenaModels()]);
   unlockAudio();
+
+  // Decor — clouds + bird flocks. No-ops if the GLB prototypes weren't
+  // loaded (Blender script not run yet).
+  spawnDecor(scene);
 
   // Swap procedural arena visuals for the GLBs.
   const islandModel = getArenaModel('island');
@@ -200,7 +213,9 @@ export async function startEngine() {
   if (mapCfg.hasUfoBoss) {
     ufoBoss = createUfoBoss({
       scene,
-      position: new THREE.Vector3(0, 520, -400),
+      // Closer + lower so the UFO is visible from spawn (was 0,520,-400 —
+      // up at the ceiling and far behind the enemy cluster, easy to miss).
+      position: new THREE.Vector3(0, 380, -200),
       getMeshFn: getUfoMesh,
     });
   }
@@ -458,6 +473,22 @@ export async function startEngine() {
     acc += dt;
     elapsed += dt;
 
+    // Camera-mode toggles run BEFORE the fixed-step loop, so they fire even
+    // when the match is in 'intro' / 'ended' state (gameplay is gated, view
+    // preference shouldn't be).
+    const updateCamBadge = (m) => {
+      const el = document.getElementById('camBadge');
+      if (el) el.textContent = `CAM: ${m}  ·  1 cockpit · 2 hybrid · 3 classic`;
+    };
+    if (consumeCameraToggle()) {
+      const newMode = cycleCameraMode();
+      console.log(`[camera] mode: ${newMode}`);
+      updateCamBadge(newMode);
+    }
+    if (consumeCam1()) { setCameraMode('cockpit'); console.log('[camera] mode: cockpit'); updateCamBadge('cockpit'); }
+    if (consumeCam2()) { setCameraMode('hybrid');  console.log('[camera] mode: hybrid');  updateCamBadge('hybrid'); }
+    if (consumeCam3()) { setCameraMode('classic'); console.log('[camera] mode: classic'); updateCamBadge('classic'); }
+
     // Fixed-step physics & game logic.
     while (acc >= FIXED_DT) {
       acc -= FIXED_DT;
@@ -486,6 +517,8 @@ export async function startEngine() {
       // auto soft-lock + missile-lock.
       const tabbed = consumeTabTap();
       const shifted = consumeShiftTap();
+      // (Camera-mode toggles moved OUT of this loop — see below — so
+      // the player can switch view during intro/end-of-match too.)
       if (tabbed) {
         // Build candidate list (hostile, alive, in front cone, in range).
         const r = player.body.rotation();
@@ -622,11 +655,11 @@ export async function startEngine() {
         sfxManeuver();
       }
 
-      // --- MP host bots: tick AI + weapons. Bots don't fire missiles. --
+      // --- MP host bots: tick AI + weapons. Bots fire missiles (slow profile)
+      // so MP feels like solo — every hostile in the air is a real threat.
       if (isMultiplayer && bots.length > 0) {
         for (const b of bots) {
           const aiIntent = updateAI(b.plane, b.brain, allPlanes, FIXED_DT);
-          aiIntent.missileFire = false;            // no missiles for MP bots
           updateAircraft(b.plane, aiIntent, FIXED_DT);
           const targets = allPlanes.filter((p) => p.team !== b.plane.team);
           updateWeapons(b.plane, b.weapon, aiIntent.fire, targets, scene, FIXED_DT, null,
@@ -635,6 +668,16 @@ export async function startEngine() {
               else applyDamage(target, damage, b.plane);
               network.sendEvent({ type: 'hit', targetId: target.id, damage, weapon });
             });
+          // MP bot missile launch — same slow profile + lock cadence as solo AI.
+          if (aiIntent.missileFire && aiIntent.missileTarget) {
+            missiles.push(fireMissile({
+              shooter: b.plane,
+              target: aiIntent.missileTarget,
+              scene,
+              profile: MISSILE_SLOW,
+            }));
+            if (aiIntent.missileTarget === player) sfxLockWarning();
+          }
           // Bot terrain crash + respawn
           checkTerrainCollision(b.plane, heightmap);
         }
@@ -687,7 +730,7 @@ export async function startEngine() {
       for (const m of ghosts) if (m.alive) missiles.push(m);
 
       // UFO boss + drones.
-      if (ufoBoss) updateUfoBoss(ufoBoss, allPlanes, scene, FIXED_DT, camera);
+      if (ufoBoss) updateUfoBoss(ufoBoss, allPlanes, scene, FIXED_DT, camera, missiles);
       if (drones.length) updateDrones(drones, allPlanes, scene, FIXED_DT, camera);
 
       updateFlares(flares, scene, FIXED_DT);
@@ -724,6 +767,18 @@ export async function startEngine() {
       if (!p.mesh) continue;
 
       syncMesh(p.mesh, p.body);
+      // Hybrid camera mode: strip pitch from the visible mesh so the model
+      // stays "level". Body still pitches mechanically (velocity goes the
+      // right direction) — only the visual is flattened. Banking into yaw
+      // input gives turning feedback. Maneuvers (loop/roll) are still
+      // applied below as a visual overlay, so dodge-rolls remain visible.
+      if (getCameraMode() === 'hybrid' && !p._maneuver) {
+        _hybridFwd.set(0, 0, -1).applyQuaternion(p.mesh.quaternion);
+        const yawAngle = Math.atan2(-_hybridFwd.x, -_hybridFwd.z);
+        const bankAngle = -(p._yawSmoothed || 0) * 0.26; // ~15° lean into turn
+        _hybridEuler.set(0, yawAngle, bankAngle);
+        p.mesh.quaternion.setFromEuler(_hybridEuler);
+      }
       if (p._maneuver) {
         _maneuverQ.setFromAxisAngle(p._maneuver.visualAxis, p._maneuver.visualAngle);
         p.mesh.quaternion.multiply(_maneuverQ);
@@ -756,6 +811,7 @@ export async function startEngine() {
     ocean.material.uniforms.uTime.value = elapsed;
     tickFX(dt);
     tickDeathTumbles(scene, dt);
+    tickDecor(dt);
     for (const p of allPlanes) tickContrail(scene, p, dt);
     updateChaseCamera(camera, player);
     updateHUD(player);

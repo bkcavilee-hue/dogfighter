@@ -80,8 +80,14 @@ export function tickFX(dt) {
 
 /** Bright sphere flash at the gun barrel. */
 export function spawnMuzzleFlash(scene, plane) {
-  const r = plane.body.rotation();
-  _q.set(r.x, r.y, r.z, r.w);
+  // Use mesh quaternion so flash emerges from the visible nose, not the
+  // physics body's nose (which is angled in hybrid camera mode).
+  if (plane.mesh) {
+    _q.copy(plane.mesh.quaternion);
+  } else {
+    const r = plane.body.rotation();
+    _q.set(r.x, r.y, r.z, r.w);
+  }
   const fwd = _vec.set(0, 0, -1).applyQuaternion(_q);
   const t = plane.body.translation();
   const pos = new THREE.Vector3(t.x + fwd.x * 2.4, t.y + fwd.y * 2.4, t.z + fwd.z * 2.4);

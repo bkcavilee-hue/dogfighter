@@ -39,6 +39,16 @@ const UFO2_PATH = '/assets/models/ufo2.glb';
 const UFO2_TARGET_LENGTH = 8;
 let _ufo2Prototype = null;
 
+// Decor: birds (small, ~2m wingspan) and clouds (large, ~80m wide). These
+// are optional — engine code skips spawning if the GLBs aren't present.
+const BIRD_PATH = '/assets/models/bird.glb';
+const BIRD_TARGET_LENGTH = 2;
+let _birdPrototype = null;
+
+const CLOUD_PATH = '/assets/models/cloud.glb';
+const CLOUD_TARGET_LENGTH = 80;
+let _cloudPrototype = null;
+
 // Per-model orientation correction. Start with 180° flip (assuming the
 // GLBs face +Z by default). If still wrong, try ±Math.PI/2 for sideways.
 const ORIENTATION = {
@@ -220,6 +230,38 @@ export function getUfo2Mesh() {
   if (!_ufo2Prototype) return null;
   return _ufo2Prototype.clone(true);
 }
+
+/* -----------------------------------------------------------------------
+ * Decor models — birds + clouds
+ * --------------------------------------------------------------------- */
+async function _loadDecor(path, targetLen) {
+  try {
+    const gltf = await loader.loadAsync(path);
+    const root = gltf.scene;
+    const box = new THREE.Box3().setFromObject(root);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const longest = Math.max(size.x, size.y, size.z) || 1;
+    root.scale.setScalar(targetLen / longest);
+    const newBox = new THREE.Box3().setFromObject(root);
+    const center = new THREE.Vector3();
+    newBox.getCenter(center);
+    root.position.sub(center);
+    const wrapper = new THREE.Group();
+    wrapper.add(root);
+    return wrapper;
+  } catch (err) {
+    // Decor is optional. Silent miss so the game still runs without GLBs.
+    console.info(`[models] decor not loaded (${path}) — skipping.`);
+    return null;
+  }
+}
+export async function preloadDecorModels() {
+  _birdPrototype  = await _loadDecor(BIRD_PATH,  BIRD_TARGET_LENGTH);
+  _cloudPrototype = await _loadDecor(CLOUD_PATH, CLOUD_TARGET_LENGTH);
+}
+export function getBirdMesh()  { return _birdPrototype  ? _birdPrototype.clone(true)  : null; }
+export function getCloudMesh() { return _cloudPrototype ? _cloudPrototype.clone(true) : null; }
 
 /* -----------------------------------------------------------------------
  * Arena GLBs (island, ocean) — loaded based on the active map.

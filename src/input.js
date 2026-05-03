@@ -17,6 +17,12 @@ export const input = {
   missilePressed: false, // Q first-press
   tabPressed: false,     // Tab — cycle next lock candidate
   shiftPressed: false,   // Shift — commit lock / unlock
+  cameraTogglePressed: false, // C — cycle camera mode (hybrid/cockpit/classic)
+  // Direct camera-mode select. Each consumed once per press. Zero-arg consumers
+  // below — engine reads them and calls setCameraMode() with the matching name.
+  cam1Pressed: false,    // 1 → cockpit
+  cam2Pressed: false,    // 2 → hybrid
+  cam3Pressed: false,    // 3 → classic
 };
 
 const DOUBLE_TAP_MS = 280;
@@ -74,6 +80,21 @@ function keyDown(code) {
     case 'ShiftRight':
       input.shiftPressed = true;
       break;
+    case 'KeyC':
+      input.cameraTogglePressed = true;
+      break;
+    case 'Digit1':
+    case 'Numpad1':
+      input.cam1Pressed = true;
+      break;
+    case 'Digit2':
+    case 'Numpad2':
+      input.cam2Pressed = true;
+      break;
+    case 'Digit3':
+    case 'Numpad3':
+      input.cam3Pressed = true;
+      break;
   }
 }
 
@@ -115,6 +136,10 @@ export const consumeFlareTap       = () => _consume('flareTap');
 export const consumeMissileTap     = () => _consume('missilePressed');
 export const consumeTabTap         = () => _consume('tabPressed');
 export const consumeShiftTap       = () => _consume('shiftPressed');
+export const consumeCameraToggle   = () => _consume('cameraTogglePressed');
+export const consumeCam1           = () => _consume('cam1Pressed');
+export const consumeCam2           = () => _consume('cam2Pressed');
+export const consumeCam3           = () => _consume('cam3Pressed');
 
 function _consume(key) {
   if (input[key]) { input[key] = false; return true; }
