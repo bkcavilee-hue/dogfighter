@@ -12,6 +12,35 @@ import { getPlaneMesh } from './models.js';
 export const PLAYER_SPEED_MUL = 1.30;
 export const PLAYER_TURN_MUL = 1.20;
 
+// Missile magazine — every plane (player + AI) gets 3 charges that reload
+// independently every 4s. Punchy: volley 3 then wait, or pace them out.
+export const MISSILE_MAX_CHARGES = 3;
+export const MISSILE_RELOAD_SEC = 4.0;
+
+/** Tick the missile magazine for one plane. Refills one charge every
+ *  MISSILE_RELOAD_SEC seconds, up to MISSILE_MAX_CHARGES. Mirrors the
+ *  per-charge timer onto plane.missileCD so HUD progress bars keep working. */
+export function tickMissileReload(plane, dt) {
+  if (!plane.alive) return;
+  if (plane.missileCharges === undefined) {
+    // Defensive: handle planes created before this system shipped.
+    plane.missileCharges = MISSILE_MAX_CHARGES;
+    plane.missileMaxCharges = MISSILE_MAX_CHARGES;
+    plane.missileChargeTimer = 0;
+  }
+  if (plane.missileCharges < plane.missileMaxCharges) {
+    plane.missileChargeTimer = Math.max(0, (plane.missileChargeTimer || 0) - dt);
+    if (plane.missileChargeTimer === 0) {
+      plane.missileCharges += 1;
+      if (plane.missileCharges < plane.missileMaxCharges) {
+        plane.missileChargeTimer = MISSILE_RELOAD_SEC;
+      }
+    }
+  }
+  // Mirror to legacy HUD field — "seconds until next missile ready".
+  plane.missileCD = plane.missileCharges > 0 ? 0 : (plane.missileChargeTimer || MISSILE_RELOAD_SEC);
+}
+
 /** Stat presets per plane class — direct from the design doc. */
 export const PLANE_STATS = {
   interceptor: {
@@ -185,9 +214,16 @@ export function createAircraft({
     boost: stats.maxBoost,
     maxBoost: stats.maxBoost,
     heat: 0,
-    // Unlimited missiles, gated by a slow recharge cooldown.
-    missileCD: 0,                 // seconds until next missile is ready
-    missileReloadSec: 7,          // duration of full recharge
+    // 3-charge missile magazine. Each charge reloads independently every
+    // MISSILE_RELOAD_SEC. Player can volley up to 3 quickly then wait.
+    missileCharges: MISSILE_MAX_CHARGES,
+    missileMaxCharges: MISSILE_MAX_CHARGES,
+    missileChargeTimer: 0,        // seconds until next charge ticks back in
+    missileReloadSec: MISSILE_RELOAD_SEC, // kept for HUD progress bar back-compat
+    // Legacy: HUD reads `missileCD` for "seconds until ready" display. Mirror
+    // missileChargeTimer here so existing HUD code keeps working until the
+    // pip UI lands.
+    missileCD: 0,
     flares: 5,
     maxFlares: 5,
     score: 0,
@@ -363,7 +399,14 @@ export function updateAircraft(plane, intent, dt) {
   // numerical drift accumulates.
   const fwdNow = _v3.set(0, 0, -1).applyQuaternion(q).normalize();
   const yawAngle   = Math.atan2(-fwdNow.x, -fwdNow.z); // heading from -Z forward
-  const pitchAngle = Math.asin(THREE.MathUtils.clamp(fwdNow.y, -1, 1));
+  // Clamp body pitch to ±85° so the camera's heading projection never
+  // collapses into the gimbal singularity at true vertical. Loops still
+  // visible via the LOOP maneuver (mesh-only animation).
+  const PITCH_LIMIT = 1.4835;   // 85° in radians
+  const pitchAngle = THREE.MathUtils.clamp(
+    Math.asin(THREE.MathUtils.clamp(fwdNow.y, -1, 1)),
+    -PITCH_LIMIT, PITCH_LIMIT,
+  );
   q.setFromEuler(new THREE.Euler(pitchAngle, yawAngle, 0, 'YXZ'));
 
   body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);

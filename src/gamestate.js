@@ -116,7 +116,10 @@ export function respawnPlane(plane, spawnPos) {
   plane.HP = plane.maxHP;
   plane.boost = plane.maxBoost;
   plane.heat = 0;
-  plane.missileCD = 0;       // missile is ready immediately on respawn
+  plane.missileCD = 0;       // legacy — kept in sync below
+  // Reset missile magazine to full on respawn.
+  plane.missileCharges = plane.missileMaxCharges ?? 3;
+  plane.missileChargeTimer = 0;
   plane.respawnTimer = 0;
   plane.invincibleTimer = 2.0;
   plane.alive = true;

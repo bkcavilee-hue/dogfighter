@@ -28,30 +28,71 @@ export function spawnDecor(scene) {
   spawnBirds(scene);
 }
 
+/** Build a soft puffy-cloud group from 4-6 overlapping flattened spheres.
+ *  Pure procedural — always available, no GLB needed. */
+function buildProceduralCloud() {
+  const group = new THREE.Group();
+  const blobCount = 4 + Math.floor(Math.random() * 3);
+  // Share one material across all blobs of the cloud — fewer draw calls
+  // and consistent shading. depthWrite=false so clouds don't z-fight when
+  // they overlap; transparent blending gives a soft volumetric look.
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.95,
+    metalness: 0.0,
+    transparent: true,
+    opacity: 0.78,
+    depthWrite: false,
+  });
+  for (let i = 0; i < blobCount; i++) {
+    const r = 8 + Math.random() * 14;       // 8-22m blob radius
+    const blob = new THREE.Mesh(
+      new THREE.SphereGeometry(r, 10, 8),
+      material,
+    );
+    // Stagger positions so the blobs overlap into a single puff.
+    blob.position.set(
+      (Math.random() - 0.5) * 22,
+      (Math.random() - 0.5) * 6,
+      (Math.random() - 0.5) * 22,
+    );
+    group.add(blob);
+  }
+  // Squash vertically into a flattened disk shape (looks like a cumulus
+  // pancake rather than a cluster of balls).
+  group.scale.y = 0.5;
+  return group;
+}
+
 function spawnClouds(scene) {
-  const proto = getCloudMesh();
-  if (!proto) return;
+  // Procedural clouds first — always available. If GLB cloud is loaded,
+  // mix some in for variety. Result either way: clouds populate the sky.
+  const usingGlb = !!getCloudMesh();
   for (let i = 0; i < CLOUD_COUNT; i++) {
-    const mesh = i === 0 ? proto : getCloudMesh();
-    const x = (Math.random() - 0.5) * ARENA.width;
-    const z = (Math.random() - 0.5) * ARENA.depth;
+    // 1-in-4 use the GLB if available; rest are procedural.
+    const useGlb = usingGlb && (i % 4 === 0);
+    const mesh = useGlb ? getCloudMesh() : buildProceduralCloud();
+    const x = (Math.random() - 0.5) * ARENA.width * 0.95;
+    const z = (Math.random() - 0.5) * ARENA.depth * 0.95;
     const y = CLOUD_ALT_MIN + Math.random() * (CLOUD_ALT_MAX - CLOUD_ALT_MIN);
     mesh.position.set(x, y, z);
     // Random horizontal scale variation so clouds don't look identical.
     const s = 0.7 + Math.random() * 1.6;
-    mesh.scale.set(s, 0.6 + Math.random() * 0.4, s);
+    mesh.scale.set(s, mesh.scale.y * (0.6 + Math.random() * 0.4), s);
     mesh.rotation.y = Math.random() * Math.PI * 2;
-    // Soft pseudo-translucency so clouds don't read as solid blocks.
-    mesh.traverse((o) => {
-      if (o.isMesh && o.material) {
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        for (const m of mats) {
-          m.transparent = true;
-          m.opacity = 0.85;
-          m.depthWrite = false;
+    // Soft pseudo-translucency on GLB clouds (procedural already set).
+    if (useGlb) {
+      mesh.traverse((o) => {
+        if (o.isMesh && o.material) {
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          for (const m of mats) {
+            m.transparent = true;
+            m.opacity = 0.85;
+            m.depthWrite = false;
+          }
         }
-      }
-    });
+      });
+    }
     scene.add(mesh);
     _clouds.push({ mesh, drift: (Math.random() - 0.5) * 1.5 });
   }

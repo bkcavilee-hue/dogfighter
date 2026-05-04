@@ -129,10 +129,12 @@ export function updateChaseCamera(camera, plane) {
 
   // ----- HEADING (yaw) on the XZ plane -----------------------------------
   // Project blendDir onto XZ. If the projection is too small (jet nose
-  // near vertical), HOLD the previous heading to prevent snap.
+  // near vertical), HOLD the previous heading to prevent snap. Threshold
+  // raised to 0.30 so we hold across a wider near-vertical band and the
+  // camera doesn't whip around when the player pitches steeply.
   const horizX = _blendDir.x, horizZ = _blendDir.z;
   const horizMag2 = horizX * horizX + horizZ * horizZ;
-  if (horizMag2 > 0.18) {
+  if (horizMag2 > 0.30) {
     const inv = 1 / Math.sqrt(horizMag2);
     const hx = horizX * inv, hz = horizZ * inv;
     if (!_initialized) {
