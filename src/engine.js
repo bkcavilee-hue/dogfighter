@@ -11,7 +11,10 @@ import {
 import {
   ARENA, generateHeightmap, createTerrain, createOcean, createSky, setupLights,
 } from './arena.js';
-import { createAircraft, updateAircraft, PLANE_STATS } from './aircraft.js';
+import {
+  createAircraft, updateAircraft, PLANE_STATS,
+  tickMissileReload, MISSILE_RELOAD_SEC,
+} from './aircraft.js';
 import {
   createCamera, updateChaseCamera, attachZoom, onResize,
   cycleCameraMode, getCameraMode, setCameraMode,
@@ -83,7 +86,11 @@ export async function startEngine() {
   document.body.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0xb6d8e8, 1200, 5500);
+  // Fog tuned to fade the 4k arena's edges into the sky color so the
+  // playable area feels boundless. Near=900 keeps mid-distance terrain
+  // crisp; far=3200 brings the horizon line well inside the 2000m
+  // half-arena so map edges disappear into haze.
+  scene.fog = new THREE.Fog(0xb6d8e8, 900, 3200);
 
   const camera = createCamera();
   attachZoom(camera);
@@ -483,7 +490,7 @@ export async function startEngine() {
     // preference shouldn't be).
     const updateCamBadge = (m) => {
       const el = document.getElementById('camBadge');
-      if (el) el.textContent = `CAM: ${m}  ·  1 cockpit · 2 hybrid · 3 classic`;
+      if (el) el.innerHTML = `CAM: <b>${m}</b><span style="opacity:0.55;">  ·  1 cockpit · 2 hybrid · 3 classic</span>`;
     };
     if (consumeCameraToggle()) {
       const newMode = cycleCameraMode();
@@ -624,12 +631,14 @@ export async function startEngine() {
         playerTargets, scene, FIXED_DT, playerSoftLock, playerOnHit
       );
 
-      // Missile fire on Q tap (unlimited ammo, gated by reload cooldown).
-      if (consumeMissileTap() && player.missileCD <= 0 && playerMissileLock) {
+      // Missile fire on Q tap — gated by 3-charge magazine.
+      if (consumeMissileTap() && player.missileCharges > 0 && playerMissileLock) {
         if (matchModeKey === 'team2v2' && playerMissileLock.team === player.team) {
           // Refuse friendly missile lock.
         } else {
-          player.missileCD = player.missileReloadSec;
+          player.missileCharges -= 1;
+          // Start the per-charge reload if it isn't already running.
+          if (player.missileChargeTimer <= 0) player.missileChargeTimer = MISSILE_RELOAD_SEC;
           missiles.push(fireMissile({ shooter: player, target: playerMissileLock, scene }));
           if (isMultiplayer) {
             network.sendEvent({
@@ -674,7 +683,10 @@ export async function startEngine() {
               network.sendEvent({ type: 'hit', targetId: target.id, damage, weapon });
             });
           // MP bot missile launch — same slow profile + lock cadence as solo AI.
-          if (aiIntent.missileFire && aiIntent.missileTarget) {
+          // Gated by the shared 3-charge magazine.
+          if (aiIntent.missileFire && aiIntent.missileTarget && b.plane.missileCharges > 0) {
+            b.plane.missileCharges -= 1;
+            if (b.plane.missileChargeTimer <= 0) b.plane.missileChargeTimer = MISSILE_RELOAD_SEC;
             missiles.push(fireMissile({
               shooter: b.plane,
               target: aiIntent.missileTarget,
@@ -701,8 +713,10 @@ export async function startEngine() {
         updateWeapons(e, aiWeapons[i], aiIntent.fire, targets, scene, FIXED_DT, null, aiOnHit);
         // AI missile launch (solo only — bots in MP don't fire missiles).
         // AI missiles use the SLOW profile so the player has time to react.
-        // AI's per-brain missileCD already throttles the rate — no ammo count.
-        if (!isMultiplayer && aiIntent.missileFire && aiIntent.missileTarget) {
+        // Gated by the shared 3-charge magazine.
+        if (!isMultiplayer && aiIntent.missileFire && aiIntent.missileTarget && e.missileCharges > 0) {
+          e.missileCharges -= 1;
+          if (e.missileChargeTimer <= 0) e.missileChargeTimer = MISSILE_RELOAD_SEC;
           missiles.push(fireMissile({
             shooter: e,
             target: aiIntent.missileTarget,
@@ -752,6 +766,11 @@ export async function startEngine() {
         tickRespawns(allPlanes, FIXED_DT, spawnFor);
       }
       tickExplosions(FIXED_DT);
+
+      // Tick missile magazines for everyone — refills one charge per
+      // MISSILE_RELOAD_SEC up to MISSILE_MAX_CHARGES. Mirrors progress
+      // onto plane.missileCD for legacy HUD code.
+      for (const p of allPlanes) tickMissileReload(p, FIXED_DT);
 
       tickMatch(match, FIXED_DT, allPlanes);
     }

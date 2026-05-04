@@ -13,11 +13,13 @@ export function createHUD() {
   if (_hud) return _hud;
   _hud = document.createElement('div');
   _hud.id = 'hud';
+  // Stat panel — moved to TOP-LEFT, below camera badge. Smaller width and
+  // tighter padding than the old bottom-right panel.
   _hud.style.cssText = `
-    position: fixed; bottom: 16px; right: 16px; z-index: 100;
+    position: fixed; top: 100px; left: 16px; z-index: 100;
     background: rgba(8,16,28,0.78); backdrop-filter: blur(8px);
-    border: 1px solid rgba(120,200,255,0.18); border-radius: 14px;
-    padding: 12px 14px; color: #d8eef8; width: 240px; pointer-events: none;
+    border: 1px solid rgba(120,200,255,0.18); border-radius: 10px;
+    padding: 10px 12px; color: #d8eef8; width: 220px; pointer-events: none;
     font-family: 'Inter', system-ui, sans-serif; font-size: 12px;
   `;
   _hud.innerHTML = `
@@ -25,16 +27,72 @@ export function createHUD() {
     <div class="bar-bg"><div id="hpBar" class="bar-fill health-fill" style="width:100%"></div></div>
     <div class="stat"><span>BOOST</span><span><b id="boostVal">100</b>%</span></div>
     <div class="bar-bg"><div id="boostBar" class="bar-fill boost-fill" style="width:100%"></div></div>
-    <div class="stat"><span>OVERHEAT</span><span><b id="heatVal">0</b>%</span></div>
+    <div class="stat"><span>HEAT</span><span><b id="heatVal">0</b>%</span></div>
     <div class="bar-bg"><div id="heatBar" class="bar-fill heat-fill" style="width:0%"></div></div>
-    <div class="stat"><span>MISSILE</span><span id="missileLabel">READY</span></div>
-    <div class="bar-bg"><div id="missileBar" class="bar-fill" style="width:100%;background:linear-gradient(90deg,#ff8866,#ffaa44);"></div></div>
     <div class="stat" style="margin-top:6px;"><span>FLARES</span><span><b id="flareVal">5</b>/<b id="flareMax">5</b></span></div>
     <div class="missile-icons" id="flareIcons"></div>
-    <div class="stat" style="margin-top:8px;"><span>SPEED</span><span><b id="speedVal">0</b> m/s</span></div>
-    <div class="stat"><span>SCORE</span><span><b id="scoreVal">0</b></span></div>
   `;
   document.body.appendChild(_hud);
+
+  // Bottom-center missile pips — 3 dots showing the magazine state.
+  const mag = document.createElement('div');
+  mag.id = 'missile-mag';
+  mag.style.cssText = `
+    position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
+    z-index: 100; pointer-events: none; text-align: center;
+    font-family: monospace; color: #ffd9a0; letter-spacing: 0.18em;
+    background: rgba(8,16,28,0.78); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,170,68,0.25); border-radius: 10px;
+    padding: 8px 18px;
+  `;
+  mag.innerHTML = `
+    <div id="missilePips" style="display:flex;gap:8px;justify-content:center;align-items:center;height:18px;"></div>
+    <div style="font-size:10px;margin-top:4px;opacity:0.85;">
+      MISSILES <b id="missileMagText">3/3</b>
+    </div>
+  `;
+  document.body.appendChild(mag);
+
+  // OOB call-out (text + pulse), shown above the missile pips.
+  const oobChip = document.createElement('div');
+  oobChip.id = 'oob-chip';
+  oobChip.style.cssText = `
+    position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
+    z-index: 105; pointer-events: none; display: none;
+    font-family: monospace; color: #ff5555; font-size: 14px;
+    letter-spacing: 0.25em; padding: 6px 14px;
+    background: rgba(40,4,4,0.85); border: 1px solid rgba(255,80,80,0.4);
+    border-radius: 6px;
+    animation: pulse 0.7s ease-in-out infinite alternate;
+  `;
+  oobChip.innerHTML = `RETURN TO BATTLE — <b id="oobChipSec">10</b>s`;
+  document.body.appendChild(oobChip);
+
+  // Bottom-left SPEED chip.
+  const speedChip = document.createElement('div');
+  speedChip.id = 'speed-chip';
+  speedChip.style.cssText = `
+    position: fixed; bottom: 16px; left: 16px; z-index: 100;
+    background: rgba(8,16,28,0.78); backdrop-filter: blur(8px);
+    border: 1px solid rgba(120,200,255,0.18); border-radius: 8px;
+    padding: 6px 12px; color: #d8eef8; pointer-events: none;
+    font-family: monospace; font-size: 12px; letter-spacing: 0.1em;
+  `;
+  speedChip.innerHTML = `SPD <b id="speedVal" style="font-size:14px;">0</b> m/s`;
+  document.body.appendChild(speedChip);
+
+  // Bottom-right SCORE chip.
+  const scoreChip = document.createElement('div');
+  scoreChip.id = 'score-chip';
+  scoreChip.style.cssText = `
+    position: fixed; bottom: 16px; right: 16px; z-index: 100;
+    background: rgba(8,16,28,0.78); backdrop-filter: blur(8px);
+    border: 1px solid rgba(120,200,255,0.18); border-radius: 8px;
+    padding: 6px 12px; color: #d8eef8; pointer-events: none;
+    font-family: monospace; font-size: 12px; letter-spacing: 0.1em;
+  `;
+  scoreChip.innerHTML = `SCORE <b id="scoreVal" style="font-size:14px;">0</b>`;
+  document.body.appendChild(scoreChip);
 
   // Minimap
   _minimap = document.createElement('canvas');
@@ -47,30 +105,83 @@ export function createHUD() {
   document.body.appendChild(_minimap);
   _ctx = _minimap.getContext('2d');
 
-  // Top-left status banner
-  const banner = document.createElement('div');
-  banner.id = 'banner';
-  banner.style.cssText = `
-    position: fixed; top: 16px; left: 16px; z-index: 100;
-    background: rgba(8,16,28,0.78); backdrop-filter: blur(8px);
-    border-left: 3px solid #4cf; color: #cfe; padding: 8px 14px;
-    border-radius: 6px; font-family: monospace; font-size: 12px;
-    letter-spacing: 0.08em;
+  // "?" floating button bottom-right of the score chip — opens controls modal.
+  const helpBtn = document.createElement('button');
+  helpBtn.id = 'help-btn';
+  helpBtn.textContent = '?';
+  helpBtn.title = 'Show controls (press ? again to close)';
+  helpBtn.style.cssText = `
+    position: fixed; bottom: 16px; right: 130px; z-index: 110;
+    width: 32px; height: 32px; border-radius: 50%;
+    background: rgba(8,16,28,0.85); color: #4cf;
+    border: 1px solid rgba(120,200,255,0.35);
+    font-family: monospace; font-size: 16px; font-weight: 700;
+    cursor: pointer; pointer-events: auto;
+    backdrop-filter: blur(8px);
   `;
-  banner.textContent = '↑ climb · ↓ dive · ←/→ turn · Space boost · W flares · E fire · Q missile · Tab cycle · Shift lock · C cycle cam · 1/2/3 cam · ←×2/→×2 roll · ↑×2 loop';
-  document.body.appendChild(banner);
+  document.body.appendChild(helpBtn);
+
+  const helpModal = document.createElement('div');
+  helpModal.id = 'help-modal';
+  helpModal.style.cssText = `
+    position: fixed; inset: 0; z-index: 600; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(6,12,22,0.78); backdrop-filter: blur(8px);
+    pointer-events: auto;
+    font-family: monospace; color: #d8eef8;
+  `;
+  helpModal.innerHTML = `
+    <div style="
+      background: rgba(8,16,28,0.95); border: 1px solid rgba(120,200,255,0.35);
+      border-radius: 10px; padding: 22px 30px; min-width: 380px;
+      letter-spacing: 0.06em; line-height: 1.9;
+    ">
+      <div style="font-size:14px;letter-spacing:0.18em;margin-bottom:14px;color:#4cf;">
+        CONTROLS
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 18px;font-size:12px;">
+        <span style="color:#ffd9a0;">↑ ↓</span><span>climb / dive</span>
+        <span style="color:#ffd9a0;">← →</span><span>turn left / right</span>
+        <span style="color:#ffd9a0;">Space</span><span>boost</span>
+        <span style="color:#ffd9a0;">E / LMB</span><span>fire guns</span>
+        <span style="color:#ffd9a0;">Q</span><span>fire missile (3 charges, 4s reload each)</span>
+        <span style="color:#ffd9a0;">W</span><span>drop flares</span>
+        <span style="color:#ffd9a0;">Tab</span><span>cycle target lock</span>
+        <span style="color:#ffd9a0;">Shift</span><span>commit / unlock target</span>
+        <span style="color:#ffd9a0;">←×2 / →×2</span><span>roll dodge</span>
+        <span style="color:#ffd9a0;">↑×2</span><span>loop</span>
+        <span style="color:#ffd9a0;">1 / 2 / 3</span><span>camera mode</span>
+        <span style="color:#ffd9a0;">C</span><span>cycle camera</span>
+        <span style="color:#ffd9a0;">Wheel</span><span>zoom in / out</span>
+      </div>
+      <div style="opacity:0.5;font-size:10px;margin-top:14px;text-align:center;">
+        click anywhere or press ESC to close
+      </div>
+    </div>
+  `;
+  document.body.appendChild(helpModal);
+
+  const toggleHelp = (open) => {
+    helpModal.style.display = open ?? (helpModal.style.display === 'none') ? 'flex' : 'none';
+  };
+  helpBtn.addEventListener('click', () => toggleHelp(true));
+  helpModal.addEventListener('click', () => toggleHelp(false));
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape') toggleHelp(false);
+    if (e.code === 'Slash' && e.shiftKey) toggleHelp();   // Shift+/ = "?"
+  });
 
   // Camera-mode badge — shows the active camera mode + the keys to switch.
   const camBadge = document.createElement('div');
   camBadge.id = 'camBadge';
   camBadge.style.cssText = `
-    position: fixed; top: 64px; left: 16px; z-index: 100;
+    position: fixed; top: 16px; left: 16px; z-index: 100; width: 220px;
     background: rgba(8,16,28,0.78); backdrop-filter: blur(8px);
-    border-left: 3px solid #ffaa44; color: #ffd9a0; padding: 6px 12px;
+    border-left: 3px solid #ffaa44; color: #ffd9a0; padding: 8px 12px;
     border-radius: 6px; font-family: monospace; font-size: 11px;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.08em; box-sizing: border-box; pointer-events: none;
   `;
-  camBadge.textContent = 'CAM: cockpit  ·  1 cockpit · 2 hybrid · 3 classic';
+  camBadge.innerHTML = `CAM: <b>cockpit</b><span style="opacity:0.55;">  ·  1 cockpit · 2 hybrid · 3 classic</span>`;
   document.body.appendChild(camBadge);
 
   // Reticle / lock overlay (full-screen canvas)
@@ -601,18 +712,73 @@ export function updateHUD(plane) {
   document.getElementById('speedVal').textContent = Math.round(plane.speed);
   document.getElementById('scoreVal').textContent = plane.score;
 
-  // Missile reload bar — fills from 0 → 100% over plane.missileReloadSec.
-  const reloadFrac = plane.missileReloadSec > 0
-    ? 1 - Math.min(1, plane.missileCD / plane.missileReloadSec)
+  // Missile pip magazine — bottom-center. Each pip = one charge. The next
+  // pending charge fills clockwise as it reloads, the rest are filled or
+  // empty based on missileCharges.
+  const pipsEl = document.getElementById('missilePips');
+  const magText = document.getElementById('missileMagText');
+  const charges = plane.missileCharges ?? 0;
+  const maxCharges = plane.missileMaxCharges ?? 3;
+  const reload = plane.missileReloadSec || 4;
+  const reloadProgress = plane.missileChargeTimer > 0
+    ? 1 - Math.min(1, plane.missileChargeTimer / reload)
     : 1;
-  const missileBar = document.getElementById('missileBar');
-  const missileLabel = document.getElementById('missileLabel');
-  if (missileBar) missileBar.style.width = (reloadFrac * 100) + '%';
-  if (missileLabel) {
-    missileLabel.textContent = plane.missileCD > 0
-      ? Math.ceil(plane.missileCD) + 's'
-      : 'READY';
-    missileLabel.style.color = plane.missileCD > 0 ? '#888' : '#a8ffb8';
+  if (pipsEl) {
+    if (pipsEl.childElementCount !== maxCharges) {
+      pipsEl.innerHTML = '';
+      for (let i = 0; i < maxCharges; i++) {
+        const pip = document.createElement('div');
+        pip.style.cssText = `
+          width: 14px; height: 14px; border-radius: 50%;
+          border: 1.5px solid rgba(255,170,68,0.55); position: relative;
+        `;
+        const fill = document.createElement('div');
+        fill.style.cssText = `
+          position: absolute; inset: 1px; border-radius: 50%;
+          background: #ffaa44; transition: opacity 0.1s, transform 0.1s;
+          opacity: 0; transform: scale(0);
+        `;
+        pip.appendChild(fill);
+        pipsEl.appendChild(pip);
+      }
+    }
+    for (let i = 0; i < maxCharges; i++) {
+      const fill = pipsEl.children[i].firstChild;
+      if (i < charges) {
+        // Fully ready charge.
+        fill.style.opacity = '1';
+        fill.style.transform = 'scale(1)';
+        fill.style.background = '#ffaa44';
+      } else if (i === charges && charges < maxCharges) {
+        // Currently reloading charge — partial fill.
+        fill.style.opacity = String(0.25 + reloadProgress * 0.65);
+        fill.style.transform = `scale(${0.3 + reloadProgress * 0.7})`;
+        fill.style.background = '#ff8866';
+      } else {
+        // Empty pip.
+        fill.style.opacity = '0';
+        fill.style.transform = 'scale(0)';
+      }
+    }
+  }
+  if (magText) {
+    if (charges < maxCharges && plane.missileChargeTimer > 0) {
+      magText.innerHTML = `${charges}/${maxCharges} <span style="opacity:0.6;">· next ${plane.missileChargeTimer.toFixed(1)}s</span>`;
+    } else {
+      magText.textContent = `${charges}/${maxCharges}`;
+    }
+  }
+
+  // OOB warning chip — visible while player is outside the play area.
+  const oobChip = document.getElementById('oob-chip');
+  if (oobChip) {
+    if (plane._oob) {
+      oobChip.style.display = 'block';
+      const sec = document.getElementById('oobChipSec');
+      if (sec) sec.textContent = Math.max(0, Math.ceil(plane._oobTimer ?? 0));
+    } else {
+      oobChip.style.display = 'none';
+    }
   }
 
   // Flare dots

@@ -11,7 +11,7 @@ export const ARENA = {
   segments: 96,
   maxHeight: 280,
   seaLevel: 0,
-  maxAltitude: 1200,     // playable ceiling — room to climb but not cosmic
+  maxAltitude: 800,      // playable ceiling — keep combat close and intimate
 };
 
 /* -----------------------------------------------------------------------
